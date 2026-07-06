@@ -74,6 +74,7 @@ onValue(liveRef, (snapshot) => {
 setInterval(() => {
   if (lastDataTime === 0) {
     setStatus("Keine Daten", false);
+    setOfflineDisplay();
     return;
   }
 
@@ -81,14 +82,15 @@ setInterval(() => {
 
   if (ageSeconds > 10) {
     setStatus("Offline", false);
+    setOfflineDisplay();
   } else {
     setStatus("Online", true);
   }
 }, 1000);
 
-function setStatus(text, isOnline) {
-  const status = document.getElementById("status");
-  status.innerText = text;
-  status.classList.remove("online", "offline");
-  status.classList.add(isOnline ? "online" : "offline");
+function setOfflineDisplay() {
+  document.getElementById("speed").innerText = "---";
+  document.getElementById("sat").innerText = "---";
+  document.getElementById("battery").innerText = "---";
+  document.getElementById("rpm").innerText = "---";
 }
