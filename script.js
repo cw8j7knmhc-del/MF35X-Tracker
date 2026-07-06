@@ -14,7 +14,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Startposition Österreich, wird sofort ersetzt sobald Firebase-Daten kommen
 let map = L.map("map").setView([48.2, 16.3], 15);
 
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -32,7 +31,7 @@ onValue(liveRef, (snapshot) => {
   const data = snapshot.val();
 
   if (!data || data.lat === undefined || data.lng === undefined) {
-    document.getElementById("status").innerText = "Keine Daten";
+    setStatus("Keine Daten", false);
     return;
   }
 
@@ -40,16 +39,24 @@ onValue(liveRef, (snapshot) => {
   const lng = Number(data.lng);
 
   if (Number.isNaN(lat) || Number.isNaN(lng)) {
-    document.getElementById("status").innerText = "GPS ungültig";
+    setStatus("GPS ungültig", false);
     return;
   }
-lastDataTime = Date.now();
-document.getElementById("status").innerText = "Online";
+
+  lastDataTime = Date.now();
+  setStatus("Online", true);
+
   document.getElementById("speed").innerText = Number(data.speed_kmh ?? 0).toFixed(1);
   document.getElementById("sat").innerText = data.satellites ?? 0;
 
   const now = new Date();
-  document.getElementById("lastUpdate").innerText = now.toLocaleTimeString("de-AT");
+  document.getElementById("lastUpdateCard").innerText = now.toLocaleTimeString("de-AT");
+
+  document.getElementById("battery").innerText =
+    data.battery_v !== undefined ? Number(data.battery_v).toFixed(1) : "---";
+
+  document.getElementById("rpm").innerText =
+    data.rpm !== undefined ? Math.round(Number(data.rpm)) : "---";
 
   marker.setLatLng([lat, lng]);
 
@@ -60,22 +67,28 @@ document.getElementById("status").innerText = "Online";
     map.panTo([lat, lng]);
   }
 
-  const mapsLink = "https://www.google.com/maps?q=" + lat + "," + lng;
-  document.getElementById("mapsButton").href = mapsLink;
+  document.getElementById("mapsButton").href =
+    "https://www.google.com/maps?q=" + lat + "," + lng;
 });
-setInterval(() => {
-  const status = document.getElementById("status");
 
+setInterval(() => {
   if (lastDataTime === 0) {
-    status.innerText = "Keine Daten";
+    setStatus("Keine Daten", false);
     return;
   }
 
   const ageSeconds = (Date.now() - lastDataTime) / 1000;
 
   if (ageSeconds > 10) {
-    status.innerText = "Offline";
+    setStatus("Offline", false);
   } else {
-    status.innerText = "Online";
+    setStatus("Online", true);
   }
 }, 1000);
+
+function setStatus(text, isOnline) {
+  const status = document.getElementById("status");
+  status.innerText = text;
+  status.classList.remove("online", "offline");
+  status.classList.add(isOnline ? "online" : "offline");
+}

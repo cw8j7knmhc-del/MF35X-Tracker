@@ -1,37 +1,18 @@
-# MF35X Live Tracker
+# MF35X Live Tracker V2
 
-Diese Webseite liest die GPS-Daten aus Firebase Realtime Database und zeigt sie live auf einer OpenStreetMap-Karte an.
+Änderungen:
+- Koordinaten-Kachel entfernt
+- Letztes Update als Kachel eingebaut
+- Platzhalter für Batteriespannung und Drehzahl vorbereitet
+- Online/Offline-Anzeige per 10-Sekunden-Timeout vorbereitet
 
-## Dateien
+## Dateien für GitHub
 
-- `index.html` – Webseite
-- `style.css` – Design
-- `script.js` – Firebase + Karte
+Diese Dateien ins Repository hochladen bzw. vorhandene ersetzen:
 
-## Start am PC
+- index.html
+- style.css
+- script.js
+- README.md
 
-1. ZIP entpacken
-2. `index.html` doppelt anklicken
-3. Falls Browser-Sicherheitsprobleme auftreten: mit VS Code + Live Server öffnen
-
-## Firebase-Pfad
-
-Die Webseite liest aus:
-
-`tracker/live`
-
-Der ESP32 sollte dort z. B. diese Daten schreiben:
-
-```json
-{
-  "lat": 48.208174,
-  "lng": 16.373819,
-  "speed_kmh": 12.4,
-  "satellites": 15,
-  "online": true
-}
-```
-
-## Später
-
-Für weltweiten Zugriff kann diese Webseite kostenlos über GitHub Pages veröffentlicht werden.
+Danach `Commit changes` klicken.

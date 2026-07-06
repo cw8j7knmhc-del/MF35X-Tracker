@@ -47,7 +47,7 @@ main {
 }
 
 .value.small {
-  font-size: 16px;
+  font-size: 18px;
   word-break: break-word;
 }
 
@@ -75,9 +75,25 @@ main {
   font-size: 14px;
 }
 
+.offline {
+  color: #ff4b4b;
+}
+
+.online {
+  color: #3cff7a;
+}
+
 @media (max-width: 600px) {
   .cards {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .value {
+    font-size: 20px;
+  }
+
+  .value.small {
+    font-size: 16px;
   }
 
   #map {
