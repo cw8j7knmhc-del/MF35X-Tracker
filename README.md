@@ -39,3 +39,4 @@ Pfad:
   "wifi_rssi": -58
 }
 ```
+V8
