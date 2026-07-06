@@ -27,7 +27,11 @@ const DEFAULT_LIMITS = {
 
 let limits = loadLimits();
 let history = { oilTemp: [], cylTemp: [] };
+let maxValues = loadMaxValues();
+let alarmHistory = loadAlarmHistory();
+let activeAlarmKeys = new Set();
 const HISTORY_MAX = 60;
+const ALARM_HISTORY_MAX = 30;
 
 let map = L.map("map").setView([48.2, 16.3], 15);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -49,6 +53,10 @@ let lastDataTime = 0;
 let lastValidPosition = null;
 
 setupSettingsUi();
+setupMaxUi();
+renderMaxValues();
+renderAlarmHistory();
+
 const liveRef = ref(db, "tracker/live");
 
 onValue(liveRef, (snapshot) => {
@@ -72,18 +80,19 @@ onValue(liveRef, (snapshot) => {
   setStatus("Online", true);
   setConnection(data);
 
-  setText("speed", data.speed_kmh !== undefined ? Number(data.speed_kmh).toFixed(1) : "---");
-  setText("sat", data.satellites !== undefined ? data.satellites : "---");
-
-  const now = new Date();
-  document.getElementById("lastUpdateSmall").innerText = now.toLocaleTimeString("de-AT");
-
+  const speed = readNumber(data.speed_kmh);
   const battery = readNumber(data.battery_v);
   const rpm = readNumber(data.rpm);
   const oilPressure = readNumber(data.oil_pressure);
   const oilTemp = readNumber(data.oil_temp);
   const cylTemp = readNumber(data.cylinder_temp);
   const hdop = readNumber(data.hdop);
+
+  setText("speed", speed !== null ? speed.toFixed(1) : "---");
+  setText("sat", data.satellites !== undefined ? data.satellites : "---");
+
+  const now = new Date();
+  document.getElementById("lastUpdateSmall").innerText = now.toLocaleTimeString("de-AT");
 
   setText("battery", battery !== null ? battery.toFixed(1) : "---");
   setText("rpm", rpm !== null ? Math.round(rpm) : "---");
@@ -92,12 +101,15 @@ onValue(liveRef, (snapshot) => {
   setText("cyltemp", cylTemp !== null ? Math.round(cylTemp) : "---");
   setGpsQuality(hdop);
 
+  updateMaxValues({ speed, rpm, oilTemp, cylTemp, oilPressure, battery });
+
   const alarms = [];
-  applyAlarmState("battery", "batteryIcon", battery, "low", limits.batteryWarn, limits.batteryAlarm, "Batteriespannung", "V", alarms);
-  applyAlarmState("oilpressure", "oilpressureIcon", oilPressure, "low", limits.oilPressureWarn, limits.oilPressureAlarm, "Öldruck", "bar", alarms);
-  applyAlarmState("oiltemp", "oiltempIcon", oilTemp, "high", limits.oilTempWarn, limits.oilTempAlarm, "Öltemperatur", "°C", alarms);
-  applyAlarmState("cyltemp", "cyltempIcon", cylTemp, "high", limits.cylTempWarn, limits.cylTempAlarm, "Zylindertemperatur", "°C", alarms);
+  applyAlarmState("battery", "batteryIcon", battery, "low", limits.batteryWarn, limits.batteryAlarm, "Batteriespannung", "V", "battery", alarms);
+  applyAlarmState("oilpressure", "oilpressureIcon", oilPressure, "low", limits.oilPressureWarn, limits.oilPressureAlarm, "Öldruck", "bar", "oilPressure", alarms);
+  applyAlarmState("oiltemp", "oiltempIcon", oilTemp, "high", limits.oilTempWarn, limits.oilTempAlarm, "Öltemperatur", "°C", "oilTemp", alarms);
+  applyAlarmState("cyltemp", "cyltempIcon", cylTemp, "high", limits.cylTempWarn, limits.cylTempAlarm, "Zylindertemperatur", "°C", "cylTemp", alarms);
   updateAlarmBanner(alarms);
+  updateAlarmHistory(alarms);
 
   addHistory("oilTemp", oilTemp);
   addHistory("cylTemp", cylTemp);
@@ -209,7 +221,7 @@ function setOfflineValues(statusText) {
   }
 }
 
-function applyAlarmState(valueId, iconId, value, direction, warnLimit, alarmLimit, label, unit, alarms) {
+function applyAlarmState(valueId, iconId, value, direction, warnLimit, alarmLimit, label, unit, alarmKey, alarms) {
   const valueElement = document.getElementById(valueId);
   const iconElement = document.getElementById(iconId);
   const card = valueElement.closest(".card");
@@ -231,12 +243,12 @@ function applyAlarmState(valueId, iconId, value, direction, warnLimit, alarmLimi
     card.classList.add("alarm-card");
     valueElement.classList.add("alarm-color");
     iconElement.classList.add("alarm-color");
-    alarms.push({ level: "alarm", text: `${label} kritisch: ${formatValue(value)} ${unit}` });
+    alarms.push({ key: alarmKey + "_alarm", level: "alarm", text: `${label} kritisch: ${formatValue(value)} ${unit}` });
   } else if (warning) {
     card.classList.add("warning-card");
     valueElement.classList.add("warn-color");
     iconElement.classList.add("warn-color");
-    alarms.push({ level: "warning", text: `${label} Warnung: ${formatValue(value)} ${unit}` });
+    alarms.push({ key: alarmKey + "_warning", level: "warning", text: `${label} Warnung: ${formatValue(value)} ${unit}` });
   }
 }
 
@@ -268,6 +280,125 @@ function updateAlarmBanner(alarms) {
   if (!hasAlarm) banner.classList.add("warning");
 
   text.innerText = alarms.map(a => a.text).join(" · ");
+}
+
+function updateAlarmHistory(alarms) {
+  const currentKeys = new Set(alarms.map(a => a.key));
+
+  alarms.forEach(alarm => {
+    if (!activeAlarmKeys.has(alarm.key)) {
+      alarmHistory.unshift({
+        time: new Date().toLocaleTimeString("de-AT"),
+        level: alarm.level,
+        text: alarm.text
+      });
+    }
+  });
+
+  activeAlarmKeys = currentKeys;
+  if (alarmHistory.length > ALARM_HISTORY_MAX) alarmHistory = alarmHistory.slice(0, ALARM_HISTORY_MAX);
+
+  localStorage.setItem("mf35xAlarmHistory", JSON.stringify(alarmHistory));
+  renderAlarmHistory();
+}
+
+function renderAlarmHistory() {
+  const container = document.getElementById("alarmHistory");
+
+  if (!alarmHistory.length) {
+    container.innerHTML = '<div class="empty-history">Noch keine Alarme.</div>';
+    return;
+  }
+
+  container.innerHTML = alarmHistory.map(entry => `
+    <div class="alarm-entry ${entry.level === "warning" ? "warning-entry" : ""}">
+      <div class="alarm-time">${entry.time}</div>
+      <div class="alarm-message">${entry.text}</div>
+    </div>
+  `).join("");
+}
+
+function loadAlarmHistory() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("mf35xAlarmHistory"));
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function updateMaxValues(values) {
+  if (values.speed !== null) maxValues.maxSpeed = maxOrValue(maxValues.maxSpeed, values.speed);
+  if (values.rpm !== null) maxValues.maxRpm = maxOrValue(maxValues.maxRpm, values.rpm);
+  if (values.oilTemp !== null) maxValues.maxOilTemp = maxOrValue(maxValues.maxOilTemp, values.oilTemp);
+  if (values.cylTemp !== null) maxValues.maxCylTemp = maxOrValue(maxValues.maxCylTemp, values.cylTemp);
+  if (values.oilPressure !== null) maxValues.minOilPressure = minOrValue(maxValues.minOilPressure, values.oilPressure);
+  if (values.battery !== null) maxValues.minBattery = minOrValue(maxValues.minBattery, values.battery);
+
+  localStorage.setItem("mf35xMaxValues", JSON.stringify(maxValues));
+  renderMaxValues();
+}
+
+function maxOrValue(current, value) {
+  return current === null || current === undefined ? value : Math.max(current, value);
+}
+
+function minOrValue(current, value) {
+  return current === null || current === undefined ? value : Math.min(current, value);
+}
+
+function renderMaxValues() {
+  setText("maxSpeed", maxValues.maxSpeed != null ? maxValues.maxSpeed.toFixed(1) : "---");
+  setText("maxRpm", maxValues.maxRpm != null ? Math.round(maxValues.maxRpm) : "---");
+  setText("maxOilTemp", maxValues.maxOilTemp != null ? Math.round(maxValues.maxOilTemp) : "---");
+  setText("maxCylTemp", maxValues.maxCylTemp != null ? Math.round(maxValues.maxCylTemp) : "---");
+  setText("minOilPressure", maxValues.minOilPressure != null ? maxValues.minOilPressure.toFixed(1) : "---");
+  setText("minBattery", maxValues.minBattery != null ? maxValues.minBattery.toFixed(1) : "---");
+}
+
+function loadMaxValues() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("mf35xMaxValues"));
+    return {
+      maxSpeed: saved?.maxSpeed ?? null,
+      maxRpm: saved?.maxRpm ?? null,
+      maxOilTemp: saved?.maxOilTemp ?? null,
+      maxCylTemp: saved?.maxCylTemp ?? null,
+      minOilPressure: saved?.minOilPressure ?? null,
+      minBattery: saved?.minBattery ?? null
+    };
+  } catch {
+    return {
+      maxSpeed: null,
+      maxRpm: null,
+      maxOilTemp: null,
+      maxCylTemp: null,
+      minOilPressure: null,
+      minBattery: null
+    };
+  }
+}
+
+function setupMaxUi() {
+  document.getElementById("resetMaxValues").addEventListener("click", () => {
+    maxValues = {
+      maxSpeed: null,
+      maxRpm: null,
+      maxOilTemp: null,
+      maxCylTemp: null,
+      minOilPressure: null,
+      minBattery: null
+    };
+    localStorage.setItem("mf35xMaxValues", JSON.stringify(maxValues));
+    renderMaxValues();
+  });
+
+  document.getElementById("clearAlarmHistory").addEventListener("click", () => {
+    alarmHistory = [];
+    activeAlarmKeys = new Set();
+    localStorage.setItem("mf35xAlarmHistory", JSON.stringify(alarmHistory));
+    renderAlarmHistory();
+  });
 }
 
 function addHistory(key, value) {

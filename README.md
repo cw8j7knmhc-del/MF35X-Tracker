@@ -1,12 +1,28 @@
-# MF35X Live Tracker V8
+# MF35X Live Tracker V9
 
-## Neu gegenüber V7
+## Neu gegenüber V8
 
-- Drehzahl-Verlauf entfernt
-- Öldruck-Verlauf entfernt
-- Zylindertemperatur-Verlauf hinzugefügt
-- Öltemperatur-Verlauf bleibt erhalten
-- Eigenes Traktorbild als Karten-Marker und Header-Symbol eingebaut
+- Maximalwerte ergänzt
+- Alarmhistorie ergänzt
+- Maximalwerte und Alarmhistorie werden lokal im Browser gespeichert
+- Reset-Button für Maximalwerte
+- Leeren-Button für Alarmhistorie
+
+## Maximalwerte
+
+Erfasst werden:
+
+- Max. Geschwindigkeit
+- Max. Drehzahl
+- Max. Öltemperatur
+- Max. Zylindertemperatur
+- Min. Öldruck
+- Min. Batteriespannung
+
+## Alarmhistorie
+
+Neue Alarme werden beim ersten Auftreten eingetragen.
+Wenn ein Alarm dauerhaft anliegt, wird er nicht sekündlich neu eingetragen.
 
 ## Dateien
 
@@ -39,4 +55,3 @@ Pfad:
   "wifi_rssi": -58
 }
 ```
-V8

@@ -99,6 +99,103 @@ main { max-width: 1120px; margin: 0 auto; padding: 14px; }
 .warn-color { color: #ffd24b !important; }
 .alarm-color { color: #ff4040 !important; }
 
+.panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.panel {
+  background: linear-gradient(145deg, #202020, #171717);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 14px;
+  text-align: left;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel h2 {
+  font-size: 18px;
+  margin: 0;
+  color: #eee;
+}
+
+.small-button {
+  background: #444;
+  border: none;
+  color: white;
+  padding: 8px 11px;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.max-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.max-item {
+  background: #151515;
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 11px;
+  padding: 12px;
+}
+
+.max-label {
+  color: #aaa;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.max-value {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.alarm-history {
+  max-height: 235px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alarm-entry {
+  background: #151515;
+  border-left: 5px solid #ff4040;
+  border-radius: 9px;
+  padding: 10px 12px;
+}
+
+.alarm-entry.warning-entry {
+  border-left-color: #ffd24b;
+}
+
+.alarm-time {
+  color: #aaa;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.alarm-message {
+  font-weight: bold;
+}
+
+.empty-history {
+  color: #aaa;
+  padding: 12px;
+}
+
 .settings {
   margin-bottom: 18px;
   text-align: left;
@@ -201,6 +298,7 @@ main { max-width: 1120px; margin: 0 auto; padding: 14px; }
 
 @media (max-width: 1050px) {
   .cards { grid-template-columns: repeat(2, 1fr); }
+  .panel-grid { grid-template-columns: 1fr; }
   .charts { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: repeat(2, 1fr); }
 }
@@ -215,6 +313,7 @@ main { max-width: 1120px; margin: 0 auto; padding: 14px; }
   .icon { font-size: 30px; }
   .value { font-size: 20px; }
   .subvalue { font-size: 12px; }
+  .max-grid { grid-template-columns: 1fr; }
   .settings-grid { grid-template-columns: 1fr; }
   #map { height: 360px; }
   .button { font-size: 18px; }

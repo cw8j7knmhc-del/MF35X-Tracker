@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MF35X Live Tracker V8</title>
+  <title>MF35X Live Tracker V9</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
@@ -13,7 +13,7 @@
 <body>
   <header>
     <div class="title"><img src="tractor.png" class="title-tractor" alt="Traktor" /> MF35X Live Tracker</div>
-    <div class="version">Version 8</div>
+    <div class="version">Version 9</div>
   </header>
 
   <main>
@@ -23,7 +23,6 @@
     </div>
 
     <section class="cards">
-
       <div class="card">
         <div class="label">Status</div>
         <i class="fa-solid fa-circle icon" id="statusIcon"></i>
@@ -86,7 +85,52 @@
         <i class="fa-solid fa-fire icon red" id="cyltempIcon"></i>
         <div class="value"><span id="cyltemp">---</span> °C</div>
       </div>
+    </section>
 
+    <section class="panel-grid">
+      <section class="panel">
+        <div class="panel-header">
+          <h2><i class="fa-solid fa-arrow-up-wide-short"></i> Maximalwerte</h2>
+          <button id="resetMaxValues" class="small-button">Zurücksetzen</button>
+        </div>
+
+        <div class="max-grid">
+          <div class="max-item">
+            <div class="max-label">Max. Geschwindigkeit</div>
+            <div class="max-value"><span id="maxSpeed">---</span> km/h</div>
+          </div>
+          <div class="max-item">
+            <div class="max-label">Max. Drehzahl</div>
+            <div class="max-value"><span id="maxRpm">---</span> U/min</div>
+          </div>
+          <div class="max-item">
+            <div class="max-label">Max. Öltemperatur</div>
+            <div class="max-value"><span id="maxOilTemp">---</span> °C</div>
+          </div>
+          <div class="max-item">
+            <div class="max-label">Max. Zylindertemperatur</div>
+            <div class="max-value"><span id="maxCylTemp">---</span> °C</div>
+          </div>
+          <div class="max-item">
+            <div class="max-label">Min. Öldruck</div>
+            <div class="max-value"><span id="minOilPressure">---</span> bar</div>
+          </div>
+          <div class="max-item">
+            <div class="max-label">Min. Batteriespannung</div>
+            <div class="max-value"><span id="minBattery">---</span> V</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2><i class="fa-solid fa-clock-rotate-left"></i> Alarmhistorie</h2>
+          <button id="clearAlarmHistory" class="small-button">Leeren</button>
+        </div>
+        <div id="alarmHistory" class="alarm-history">
+          <div class="empty-history">Noch keine Alarme.</div>
+        </div>
+      </section>
     </section>
 
     <section class="settings">
@@ -128,11 +172,11 @@
     </a>
 
     <div class="footer">
-      Tracker V8 · Traktor-Marker · Öltemperatur/Zylindertemperatur-Verlauf
+      Tracker V9 · Maximalwerte · Alarmhistorie · Traktor-Marker
     </div>
   </main>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script type="module" src="script.js?v=8"></script>
+  <script type="module" src="script.js?v=9"></script>
 </body>
 </html>
