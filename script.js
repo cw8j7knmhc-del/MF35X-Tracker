@@ -24,6 +24,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 let marker = L.marker([48.2, 16.3]).addTo(map);
 let firstPosition = true;
+let lastDataTime = 0;
 
 const liveRef = ref(db, "tracker/live");
 
