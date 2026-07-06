@@ -42,8 +42,8 @@ onValue(liveRef, (snapshot) => {
     document.getElementById("status").innerText = "GPS ungültig";
     return;
   }
-
-  document.getElementById("status").innerText = data.online ? "Online" : "Offline";
+lastDataTime = Date.now();
+document.getElementById("status").innerText = "Online";
   document.getElementById("speed").innerText = Number(data.speed_kmh ?? 0).toFixed(1);
   document.getElementById("sat").innerText = data.satellites ?? 0;
   document.getElementById("coords").innerText = lat.toFixed(6) + ", " + lng.toFixed(6);
