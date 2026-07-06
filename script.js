@@ -157,7 +157,7 @@ function setupNotifications() {
 
   if (Notification.permission === "granted") {
     status.innerText = "Benachrichtigung an";
-    button.innerText = "Benachrichtigungen aktiv";
+    button.innerHTML = '<i class="fa-solid fa-bell"></i> Benachrichtigungen aktiv';
     button.classList.add("disabled");
     button.disabled = true;
   }
@@ -166,7 +166,7 @@ function setupNotifications() {
     const permission = await Notification.requestPermission();
     if (permission === "granted") {
       status.innerText = "Benachrichtigung an";
-      button.innerText = "Benachrichtigungen aktiv";
+      button.innerHTML = '<i class="fa-solid fa-bell"></i> Benachrichtigungen aktiv';
       button.classList.add("disabled");
       button.disabled = true;
       showNotification("MF35X Tracker", "Benachrichtigungen sind aktiviert.");
@@ -268,7 +268,7 @@ function setOfflineValues(statusText) {
 function applyAlarmState(valueId, iconId, value, direction, warnLimit, alarmLimit, label, unit, alarmKey, alarms) {
   const valueElement = document.getElementById(valueId);
   const iconElement = document.getElementById(iconId);
-  const card = valueElement.closest(".cockpit-card") || valueElement.closest(".card");
+  const card = valueElement.closest(".card");
   clearAlarmState(valueId);
   if (value === null) return;
 
@@ -303,7 +303,7 @@ function formatValue(value) {
 function clearAlarmState(valueId) {
   const valueElement = document.getElementById(valueId);
   if (!valueElement) return;
-  const card = valueElement.closest(".cockpit-card") || valueElement.closest(".card");
+  const card = valueElement.closest(".card");
   const icon = card.querySelector(".icon");
   card.classList.remove("warning-card", "alarm-card");
   valueElement.classList.remove("warn-color", "alarm-color");
@@ -427,7 +427,14 @@ function loadMaxValues() {
 
 function setupMaxUi() {
   document.getElementById("resetMaxValues").addEventListener("click", () => {
-    maxValues = { maxSpeed: null, maxRpm: null, maxOilTemp: null, maxCylTemp: null, minOilPressure: null, minBattery: null };
+    maxValues = {
+      maxSpeed: null,
+      maxRpm: null,
+      maxOilTemp: null,
+      maxCylTemp: null,
+      minOilPressure: null,
+      minBattery: null
+    };
     localStorage.setItem("mf35xMaxValues", JSON.stringify(maxValues));
     renderMaxValues();
   });

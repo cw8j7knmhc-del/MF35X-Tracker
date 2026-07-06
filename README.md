@@ -1,26 +1,16 @@
-# MF35X Cockpit Tracker V10
+# MF35X Live Tracker V9.1
 
 ## Neu gegenüber V9
 
-- Cockpit-Layout
-- Große zentrale Geschwindigkeit
-- Große Drehzahl-Anzeige
-- Motorwerte links/rechts im Cockpit-Stil
+- V9-Layout bleibt erhalten
 - Browser-Benachrichtigung bei neuen Alarmen
+- Maximalwerte sind ausklappbar
+- Alarmhistorie ist ausklappbar
 - PWA-Manifest vorbereitet
 
-## Wichtig zu Push-Benachrichtigungen
+## Wichtig zu Benachrichtigungen
 
-Diese Version nutzt Browser-Benachrichtigungen, solange die Webseite geöffnet ist oder im Hintergrund läuft.
+Diese Version nutzt Browser-Benachrichtigungen.
+Sie funktionieren, wenn die Webseite geöffnet ist oder im Hintergrund läuft.
 
-Echte Push-Benachrichtigungen, die auch ohne geöffnete Webseite funktionieren, benötigen zusätzlich Firebase Cloud Messaging und eine kleine Server-/Cloud-Function-Konfiguration. Das können wir als nächsten Schritt bauen.
-
-## Dateien für GitHub
-
-- `index.html`
-- `style.css`
-- `script.js`
-- `manifest.json`
-- `README.md`
-- `tractor.png`
-- V9.1
+Echte Push-Nachrichten auch bei geschlossener Webseite benötigen später Firebase Cloud Messaging.
