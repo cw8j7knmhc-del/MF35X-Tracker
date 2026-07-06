@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MF35X Live Tracker V9</title>
+  <title>MF35X Cockpit Tracker V10</title>
 
+  <link rel="manifest" href="manifest.json" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
   <link rel="stylesheet" href="style.css" />
@@ -12,8 +13,11 @@
 
 <body>
   <header>
-    <div class="title"><img src="tractor.png" class="title-tractor" alt="Traktor" /> MF35X Live Tracker</div>
-    <div class="version">Version 9</div>
+    <div class="title">
+      <img src="tractor.png" class="title-tractor" alt="Traktor" />
+      MF35X Cockpit Tracker
+    </div>
+    <div class="version">Version 10 · Cockpit Layout · Benachrichtigung</div>
   </header>
 
   <main>
@@ -22,69 +26,96 @@
       <span id="alarmText">Alarm</span>
     </div>
 
-    <section class="cards">
-      <div class="card">
-        <div class="label">Status</div>
-        <i class="fa-solid fa-circle icon" id="statusIcon"></i>
-        <div class="value" id="status">Warte...</div>
-        <div class="subvalue">Letztes Update: <span id="lastUpdateSmall">---</span></div>
+    <section class="cockpit">
+
+      <div class="cockpit-column">
+        <div class="cockpit-card critical-card">
+          <div class="label">Öldruck</div>
+          <i class="fa-solid fa-oil-can icon orange" id="oilpressureIcon"></i>
+          <div class="big-value"><span id="oilpressure">---</span></div>
+          <div class="unit">bar</div>
+        </div>
+
+        <div class="cockpit-card">
+          <div class="label">Öltemperatur</div>
+          <i class="fa-solid fa-temperature-three-quarters icon red" id="oiltempIcon"></i>
+          <div class="big-value"><span id="oiltemp">---</span></div>
+          <div class="unit">°C</div>
+        </div>
+
+        <div class="cockpit-card">
+          <div class="label">Zylindertemperatur</div>
+          <i class="fa-solid fa-fire icon red" id="cyltempIcon"></i>
+          <div class="big-value"><span id="cyltemp">---</span></div>
+          <div class="unit">°C</div>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="label">Verbindung</div>
-        <i class="fa-solid fa-wifi icon blue" id="connectionIcon"></i>
-        <div class="value" id="connection">---</div>
-        <div class="subvalue">RSSI: <span id="wifiRssi">---</span> dBm</div>
+      <div class="cockpit-center">
+        <div class="main-speed">
+          <div class="label">Geschwindigkeit</div>
+          <div class="speed-value"><span id="speed">---</span></div>
+          <div class="unit">km/h</div>
+        </div>
+
+        <div class="rpm-display">
+          <i class="fa-solid fa-gauge-high icon yellow" id="rpmIcon"></i>
+          <div>
+            <div class="label">Drehzahl</div>
+            <div class="rpm-value"><span id="rpm">---</span> <span class="rpm-unit">U/min</span></div>
+          </div>
+        </div>
+
+        <div class="status-row">
+          <div class="mini-status">
+            <i class="fa-solid fa-circle" id="statusIcon"></i>
+            <span id="status">Warte...</span>
+          </div>
+          <div class="mini-status">
+            <i class="fa-solid fa-bell"></i>
+            <span id="notifyStatus">Benachrichtigung aus</span>
+          </div>
+        </div>
+
+        <button id="enableNotifications" class="notify-button">
+          <i class="fa-solid fa-bell"></i> Benachrichtigungen aktivieren
+        </button>
+
+        <div class="subvalue center-update">
+          Letztes Update: <span id="lastUpdateSmall">---</span>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="label">GPS-Qualität</div>
-        <i class="fa-solid fa-location-crosshairs icon purple" id="gpsQualityIcon"></i>
-        <div class="value" id="gpsQuality">---</div>
-        <div class="subvalue">HDOP: <span id="hdop">---</span></div>
+      <div class="cockpit-column">
+        <div class="cockpit-card">
+          <div class="label">Batteriespannung</div>
+          <i class="fa-solid fa-car-battery icon green" id="batteryIcon"></i>
+          <div class="big-value"><span id="battery">---</span></div>
+          <div class="unit">V</div>
+        </div>
+
+        <div class="cockpit-card">
+          <div class="label">GPS-Qualität</div>
+          <i class="fa-solid fa-location-crosshairs icon purple" id="gpsQualityIcon"></i>
+          <div class="big-value small"><span id="gpsQuality">---</span></div>
+          <div class="unit">HDOP: <span id="hdop">---</span></div>
+        </div>
+
+        <div class="cockpit-card">
+          <div class="label">Verbindung</div>
+          <i class="fa-solid fa-wifi icon blue" id="connectionIcon"></i>
+          <div class="big-value small" id="connection">---</div>
+          <div class="unit">RSSI: <span id="wifiRssi">---</span> dBm</div>
+        </div>
+
+        <div class="cockpit-card">
+          <div class="label">Satelliten</div>
+          <i class="fa-solid fa-satellite-dish icon purple"></i>
+          <div class="big-value"><span id="sat">---</span></div>
+          <div class="unit">Sat.</div>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="label">Geschwindigkeit</div>
-        <i class="fa-solid fa-road icon blue"></i>
-        <div class="value"><span id="speed">---</span> km/h</div>
-      </div>
-
-      <div class="card">
-        <div class="label">Satelliten</div>
-        <i class="fa-solid fa-satellite-dish icon purple"></i>
-        <div class="value" id="sat">---</div>
-      </div>
-
-      <div class="card">
-        <div class="label">Batteriespannung</div>
-        <i class="fa-solid fa-car-battery icon green" id="batteryIcon"></i>
-        <div class="value"><span id="battery">---</span> V</div>
-      </div>
-
-      <div class="card">
-        <div class="label">Drehzahl</div>
-        <i class="fa-solid fa-gauge-high icon yellow" id="rpmIcon"></i>
-        <div class="value"><span id="rpm">---</span> U/min</div>
-      </div>
-
-      <div class="card">
-        <div class="label">Öldruck</div>
-        <i class="fa-solid fa-oil-can icon orange" id="oilpressureIcon"></i>
-        <div class="value"><span id="oilpressure">---</span> bar</div>
-      </div>
-
-      <div class="card">
-        <div class="label">Öltemperatur</div>
-        <i class="fa-solid fa-temperature-three-quarters icon red" id="oiltempIcon"></i>
-        <div class="value"><span id="oiltemp">---</span> °C</div>
-      </div>
-
-      <div class="card">
-        <div class="label">Zylindertemperatur</div>
-        <i class="fa-solid fa-fire icon red" id="cyltempIcon"></i>
-        <div class="value"><span id="cyltemp">---</span> °C</div>
-      </div>
     </section>
 
     <section class="panel-grid">
@@ -95,30 +126,12 @@
         </div>
 
         <div class="max-grid">
-          <div class="max-item">
-            <div class="max-label">Max. Geschwindigkeit</div>
-            <div class="max-value"><span id="maxSpeed">---</span> km/h</div>
-          </div>
-          <div class="max-item">
-            <div class="max-label">Max. Drehzahl</div>
-            <div class="max-value"><span id="maxRpm">---</span> U/min</div>
-          </div>
-          <div class="max-item">
-            <div class="max-label">Max. Öltemperatur</div>
-            <div class="max-value"><span id="maxOilTemp">---</span> °C</div>
-          </div>
-          <div class="max-item">
-            <div class="max-label">Max. Zylindertemperatur</div>
-            <div class="max-value"><span id="maxCylTemp">---</span> °C</div>
-          </div>
-          <div class="max-item">
-            <div class="max-label">Min. Öldruck</div>
-            <div class="max-value"><span id="minOilPressure">---</span> bar</div>
-          </div>
-          <div class="max-item">
-            <div class="max-label">Min. Batteriespannung</div>
-            <div class="max-value"><span id="minBattery">---</span> V</div>
-          </div>
+          <div class="max-item"><div class="max-label">Max. Geschwindigkeit</div><div class="max-value"><span id="maxSpeed">---</span> km/h</div></div>
+          <div class="max-item"><div class="max-label">Max. Drehzahl</div><div class="max-value"><span id="maxRpm">---</span> U/min</div></div>
+          <div class="max-item"><div class="max-label">Max. Öltemperatur</div><div class="max-value"><span id="maxOilTemp">---</span> °C</div></div>
+          <div class="max-item"><div class="max-label">Max. Zylindertemperatur</div><div class="max-value"><span id="maxCylTemp">---</span> °C</div></div>
+          <div class="max-item"><div class="max-label">Min. Öldruck</div><div class="max-value"><span id="minOilPressure">---</span> bar</div></div>
+          <div class="max-item"><div class="max-label">Min. Batteriespannung</div><div class="max-value"><span id="minBattery">---</span> V</div></div>
         </div>
       </section>
 
@@ -150,7 +163,7 @@
 
         <button id="saveSettings" class="save-button">Grenzen speichern</button>
         <button id="resetSettings" class="reset-button">Standardwerte laden</button>
-        <div class="settings-note">Die Werte werden lokal im Browser gespeichert.</div>
+        <div class="settings-note">Grenzen, Maximalwerte und Alarmhistorie werden lokal im Browser gespeichert.</div>
       </details>
     </section>
 
@@ -172,11 +185,11 @@
     </a>
 
     <div class="footer">
-      Tracker V9 · Maximalwerte · Alarmhistorie · Traktor-Marker
+      Tracker V10 · Cockpit Layout · Browser-Benachrichtigung · Maximalwerte · Alarmhistorie
     </div>
   </main>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script type="module" src="script.js?v=9"></script>
+  <script type="module" src="script.js?v=10"></script>
 </body>
 </html>

@@ -54,6 +54,7 @@ let lastValidPosition = null;
 
 setupSettingsUi();
 setupMaxUi();
+setupNotifications();
 renderMaxValues();
 renderAlarmHistory();
 
@@ -143,6 +144,49 @@ setInterval(() => {
   }
 }, 1000);
 
+function setupNotifications() {
+  const button = document.getElementById("enableNotifications");
+  const status = document.getElementById("notifyStatus");
+
+  if (!("Notification" in window)) {
+    status.innerText = "Nicht unterstützt";
+    button.classList.add("disabled");
+    button.disabled = true;
+    return;
+  }
+
+  if (Notification.permission === "granted") {
+    status.innerText = "Benachrichtigung an";
+    button.innerText = "Benachrichtigungen aktiv";
+    button.classList.add("disabled");
+    button.disabled = true;
+  }
+
+  button.addEventListener("click", async () => {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      status.innerText = "Benachrichtigung an";
+      button.innerText = "Benachrichtigungen aktiv";
+      button.classList.add("disabled");
+      button.disabled = true;
+      showNotification("MF35X Tracker", "Benachrichtigungen sind aktiviert.");
+    } else {
+      status.innerText = "Blockiert";
+    }
+  });
+}
+
+function showNotification(title, body) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+
+  new Notification(title, {
+    body,
+    icon: "tractor.png",
+    badge: "tractor.png"
+  });
+}
+
 function setText(id, value) { document.getElementById(id).innerText = value; }
 
 function readNumber(value) {
@@ -224,7 +268,7 @@ function setOfflineValues(statusText) {
 function applyAlarmState(valueId, iconId, value, direction, warnLimit, alarmLimit, label, unit, alarmKey, alarms) {
   const valueElement = document.getElementById(valueId);
   const iconElement = document.getElementById(iconId);
-  const card = valueElement.closest(".card");
+  const card = valueElement.closest(".cockpit-card") || valueElement.closest(".card");
   clearAlarmState(valueId);
   if (value === null) return;
 
@@ -259,7 +303,7 @@ function formatValue(value) {
 function clearAlarmState(valueId) {
   const valueElement = document.getElementById(valueId);
   if (!valueElement) return;
-  const card = valueElement.closest(".card");
+  const card = valueElement.closest(".cockpit-card") || valueElement.closest(".card");
   const icon = card.querySelector(".icon");
   card.classList.remove("warning-card", "alarm-card");
   valueElement.classList.remove("warn-color", "alarm-color");
@@ -292,6 +336,8 @@ function updateAlarmHistory(alarms) {
         level: alarm.level,
         text: alarm.text
       });
+
+      showNotification("MF35X Alarm", alarm.text);
     }
   });
 
@@ -381,14 +427,7 @@ function loadMaxValues() {
 
 function setupMaxUi() {
   document.getElementById("resetMaxValues").addEventListener("click", () => {
-    maxValues = {
-      maxSpeed: null,
-      maxRpm: null,
-      maxOilTemp: null,
-      maxCylTemp: null,
-      minOilPressure: null,
-      minBattery: null
-    };
+    maxValues = { maxSpeed: null, maxRpm: null, maxOilTemp: null, maxCylTemp: null, minOilPressure: null, minBattery: null };
     localStorage.setItem("mf35xMaxValues", JSON.stringify(maxValues));
     renderMaxValues();
   });

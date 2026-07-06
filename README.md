@@ -1,57 +1,25 @@
-# MF35X Live Tracker V9
+# MF35X Cockpit Tracker V10
 
-## Neu gegenüber V8
+## Neu gegenüber V9
 
-- Maximalwerte ergänzt
-- Alarmhistorie ergänzt
-- Maximalwerte und Alarmhistorie werden lokal im Browser gespeichert
-- Reset-Button für Maximalwerte
-- Leeren-Button für Alarmhistorie
+- Cockpit-Layout
+- Große zentrale Geschwindigkeit
+- Große Drehzahl-Anzeige
+- Motorwerte links/rechts im Cockpit-Stil
+- Browser-Benachrichtigung bei neuen Alarmen
+- PWA-Manifest vorbereitet
 
-## Maximalwerte
+## Wichtig zu Push-Benachrichtigungen
 
-Erfasst werden:
+Diese Version nutzt Browser-Benachrichtigungen, solange die Webseite geöffnet ist oder im Hintergrund läuft.
 
-- Max. Geschwindigkeit
-- Max. Drehzahl
-- Max. Öltemperatur
-- Max. Zylindertemperatur
-- Min. Öldruck
-- Min. Batteriespannung
+Echte Push-Benachrichtigungen, die auch ohne geöffnete Webseite funktionieren, benötigen zusätzlich Firebase Cloud Messaging und eine kleine Server-/Cloud-Function-Konfiguration. Das können wir als nächsten Schritt bauen.
 
-## Alarmhistorie
-
-Neue Alarme werden beim ersten Auftreten eingetragen.
-Wenn ein Alarm dauerhaft anliegt, wird er nicht sekündlich neu eingetragen.
-
-## Dateien
-
-Diese Dateien müssen in GitHub liegen:
+## Dateien für GitHub
 
 - `index.html`
 - `style.css`
 - `script.js`
+- `manifest.json`
 - `README.md`
 - `tractor.png`
-
-## Erwartete Firebase-Felder
-
-Pfad:
-
-`tracker/live`
-
-```json
-{
-  "lat": 48.208174,
-  "lng": 16.373819,
-  "speed_kmh": 12.4,
-  "satellites": 13,
-  "battery_v": 13.8,
-  "rpm": 2100,
-  "oil_pressure": 4.2,
-  "oil_temp": 92,
-  "cylinder_temp": 145,
-  "hdop": 1.2,
-  "wifi_rssi": -58
-}
-```
