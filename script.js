@@ -55,7 +55,17 @@ onValue(liveRef, (snapshot) => {
   document.getElementById("battery").innerText =
     data.battery_v !== undefined ? Number(data.battery_v).toFixed(1) : "---";
 
-  document.getElementById("rpm").innerText =
+  document.getElementById("oilpressure").innerText =
+    data.oil_pressure !== undefined
+    ? Number(data.oil_pressure).toFixed(1)
+    : "---";
+
+document.getElementById("oiltemp").innerText =
+    data.oil_temp !== undefined
+    ? Math.round(Number(data.oil_temp))
+    : "---";
+
+  document.getElementById("U/min").innerText =
     data.rpm !== undefined ? Math.round(Number(data.rpm)) : "---";
 
   marker.setLatLng([lat, lng]);
@@ -92,5 +102,7 @@ function setOfflineDisplay() {
   document.getElementById("speed").innerText = "---";
   document.getElementById("sat").innerText = "---";
   document.getElementById("battery").innerText = "---";
-  document.getElementById("rpm").innerText = "---";
+  document.getElementById("oilpressure").innerText="---";
+  document.getElementById("oiltemp").innerText="---";
+  document.getElementById("U/min").innerText = "---";
 }
