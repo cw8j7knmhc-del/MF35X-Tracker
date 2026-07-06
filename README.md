@@ -14,5 +14,7 @@ Diese Dateien ins Repository hochladen bzw. vorhandene ersetzen:
 - style.css
 - script.js
 - README.md
+- 
+Update V2
 
 Danach `Commit changes` klicken.
