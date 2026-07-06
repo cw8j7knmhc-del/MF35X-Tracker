@@ -15,6 +15,6 @@ Diese Dateien ins Repository hochladen bzw. vorhandene ersetzen:
 - script.js
 - README.md
 - 
-Update V2
+Update V2.1
 
 Danach `Commit changes` klicken.
