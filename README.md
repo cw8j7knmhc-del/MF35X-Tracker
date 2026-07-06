@@ -1,16 +1,14 @@
-# MF35X Live Tracker V9.1
+# MF35X Live Tracker V9.2
 
-## Neu gegenüber V9
+Neu gegenüber V9.1:
+- Benachrichtigungen können direkt auf der Website EIN/AUS geschaltet werden.
+- Wenn AUS, werden keine Browser-Benachrichtigungen ausgelöst.
+- Browser-Berechtigung kann weiterhin über die Browser-Einstellungen blockiert werden.
 
-- V9-Layout bleibt erhalten
-- Browser-Benachrichtigung bei neuen Alarmen
-- Maximalwerte sind ausklappbar
-- Alarmhistorie ist ausklappbar
-- PWA-Manifest vorbereitet
-
-## Wichtig zu Benachrichtigungen
-
-Diese Version nutzt Browser-Benachrichtigungen.
-Sie funktionieren, wenn die Webseite geöffnet ist oder im Hintergrund läuft.
-
-Echte Push-Nachrichten auch bei geschlossener Webseite benötigen später Firebase Cloud Messaging.
+Dateien für GitHub:
+- index.html
+- style.css
+- script.js
+- manifest.json
+- README.md
+- tractor.png
