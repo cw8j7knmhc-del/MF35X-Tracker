@@ -1,20 +1,40 @@
-# MF35X Live Tracker V2
+# MF35X Live Tracker V4
 
-Änderungen:
-- Koordinaten-Kachel entfernt
-- Letztes Update als Kachel eingebaut
-- Platzhalter für Batteriespannung und Drehzahl vorbereitet
-- Online/Offline-Anzeige per 10-Sekunden-Timeout vorbereitet
+## Enthalten
 
-## Dateien für GitHub
+- Modernes Dashboard mit Visualisierungen
+- Status mit LED-Punkt
+- Geschwindigkeit
+- Satelliten
+- Letztes Update
+- Batteriespannung
+- Drehzahl in u/min
+- Öldruck
+- Öltemperatur
+- Zylindertemperatur
+- OpenStreetMap
+- Google-Maps-Link
 
-Diese Dateien ins Repository hochladen bzw. vorhandene ersetzen:
+## Erwartete Firebase-Felder
 
-- index.html
-- style.css
-- script.js
-- README.md
-- 
-Update V2.1
+Pfad:
 
-Danach `Commit changes` klicken.
+`tracker/live`
+
+Felder:
+
+```json
+{
+  "lat": 48.208174,
+  "lng": 16.373819,
+  "speed_kmh": 12.4,
+  "satellites": 13,
+  "battery_v": 13.8,
+  "rpm": 2100,
+  "oil_pressure": 4.2,
+  "oil_temp": 92,
+  "cylinder_temp": 145
+}
+```
+
+Nicht vorhandene Werte werden als `---` angezeigt.

@@ -10,63 +10,78 @@
 </head>
 
 <body>
-  <header>🚜 MF35X Live Tracker</header>
+  <header>
+    <div class="title">🚜 MF35X Live Tracker</div>
+  </header>
 
   <main>
     <section class="cards">
+
       <div class="card">
         <div class="label">Status</div>
+        <div class="icon status-dot" id="statusDot"></div>
         <div class="value" id="status">Warte...</div>
+        <div class="subvalue">Letztes Update: <span id="lastUpdateSmall">---</span></div>
       </div>
 
       <div class="card">
         <div class="label">Geschwindigkeit</div>
-        <div class="value"><span id="speed">0.0</span> km/h</div>
+        <div class="icon blue">⏱️</div>
+        <div class="value"><span id="speed">---</span> km/h</div>
       </div>
 
       <div class="card">
         <div class="label">Satelliten</div>
-        <div class="value" id="sat">0</div>
+        <div class="icon purple">🛰️</div>
+        <div class="value" id="sat">---</div>
       </div>
 
       <div class="card">
         <div class="label">Letztes Update</div>
+        <div class="icon orange">🕒</div>
         <div class="value small" id="lastUpdateCard">---</div>
       </div>
 
       <div class="card">
         <div class="label">Batteriespannung</div>
+        <div class="icon green">🔋</div>
         <div class="value"><span id="battery">---</span> V</div>
       </div>
 
       <div class="card">
         <div class="label">Drehzahl</div>
-        <div class="value"><span id="rpm">---</span> U/min</div>
+        <div class="icon yellow">⚙️</div>
+        <div class="value"><span id="rpm">---</span> u/min</div>
       </div>
-      
-      <div class="card">
-    <div class="label">Öldruck</div>
-    <div class="value">
-        <span id="oilpressure">---</span> bar
-    </div>
-</div>
 
-<div class="card">
-    <div class="label">Öltemperatur</div>
-    <div class="value">
-        <span id="oiltemp">---</span> °C
-    </div>
-</div>
+      <div class="card">
+        <div class="label">Öldruck</div>
+        <div class="icon orange">🛢️</div>
+        <div class="value"><span id="oilpressure">---</span> bar</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Öltemperatur</div>
+        <div class="icon red">🌡️</div>
+        <div class="value"><span id="oiltemp">---</span> °C</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Zylindertemperatur</div>
+        <div class="icon red">🌡️</div>
+        <div class="value"><span id="cyltemp">---</span> °C</div>
+      </div>
+
     </section>
 
     <section id="map"></section>
 
-    <a id="mapsButton" class="button" href="#" target="_blank">
+    <a id="mapsButton" class="button disabled" href="#" target="_blank">
       📍 In Google Maps öffnen
     </a>
 
     <div class="footer">
-      Tracker V2 · Live über Firebase
+      Tracker V4 · vorbereitet für Öldruck, Öltemperatur und Zylindertemperatur
     </div>
   </main>
 
