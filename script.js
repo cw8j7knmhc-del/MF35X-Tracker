@@ -47,7 +47,6 @@ lastDataTime = Date.now();
 document.getElementById("status").innerText = "Online";
   document.getElementById("speed").innerText = Number(data.speed_kmh ?? 0).toFixed(1);
   document.getElementById("sat").innerText = data.satellites ?? 0;
-  document.getElementById("coords").innerText = lat.toFixed(6) + ", " + lng.toFixed(6);
 
   const now = new Date();
   document.getElementById("lastUpdate").innerText = now.toLocaleTimeString("de-AT");
