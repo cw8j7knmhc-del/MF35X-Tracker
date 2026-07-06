@@ -1,14 +1,25 @@
-# MF35X Live Tracker V5
+# MF35X Live Tracker V6
 
-Änderungen:
-- Kachel „Letztes Update“ entfernt
-- Letztes Update bleibt in der Status-Kachel
-- Drehzahl-Einheit: u/min
-- Öldruck-Icon geändert
-- Drehzahl-Icon geändert
-- Dashboard mit 8 Kacheln
+## Änderungen
 
-## Firebase-Felder
+- Font-Awesome-Icons statt Emoji-Icons
+- Drehzahl mit `U/min`
+- Drehzahl-Icon: Tacho/Gauge
+- Öldruck-Icon: Ölkanne
+- Keine Runden-/Fahrtenprotokoll-Funktion
+- Einstellbare Alarmgrenzen direkt auf der Webseite
+- Alarmgrenzen werden lokal im Browser gespeichert
+
+## Alarmgrenzen
+
+Aktuell vorbereitet für:
+
+- Batteriespannung
+- Öldruck
+- Öltemperatur
+- Zylindertemperatur
+
+## Erwartete Firebase-Felder
 
 Pfad:
 

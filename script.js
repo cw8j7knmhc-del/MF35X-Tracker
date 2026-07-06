@@ -14,6 +14,19 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+const DEFAULT_LIMITS = {
+  batteryWarn: 12.2,
+  batteryAlarm: 11.8,
+  oilPressureWarn: 2.0,
+  oilPressureAlarm: 1.2,
+  oilTempWarn: 110,
+  oilTempAlarm: 125,
+  cylTempWarn: 180,
+  cylTempAlarm: 220
+};
+
+let limits = loadLimits();
+
 let map = L.map("map").setView([48.2, 16.3], 15);
 
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -25,6 +38,8 @@ let marker = L.marker([48.2, 16.3]).addTo(map);
 let firstPosition = true;
 let lastDataTime = 0;
 let lastValidPosition = null;
+
+setupSettingsUi();
 
 const liveRef = ref(db, "tracker/live");
 
@@ -48,30 +63,28 @@ onValue(liveRef, (snapshot) => {
   lastValidPosition = { lat, lng };
   setStatus("Online", true);
 
-  document.getElementById("speed").innerText =
-    data.speed_kmh !== undefined ? Number(data.speed_kmh).toFixed(1) : "---";
-
-  document.getElementById("sat").innerText =
-    data.satellites !== undefined ? data.satellites : "---";
+  setText("speed", data.speed_kmh !== undefined ? Number(data.speed_kmh).toFixed(1) : "---");
+  setText("sat", data.satellites !== undefined ? data.satellites : "---");
 
   const now = new Date();
-  const timeText = now.toLocaleTimeString("de-AT");
-  document.getElementById("lastUpdateSmall").innerText = timeText;
+  document.getElementById("lastUpdateSmall").innerText = now.toLocaleTimeString("de-AT");
 
-  document.getElementById("battery").innerText =
-    data.battery_v !== undefined ? Number(data.battery_v).toFixed(1) : "---";
+  const battery = readNumber(data.battery_v);
+  const rpm = readNumber(data.rpm);
+  const oilPressure = readNumber(data.oil_pressure);
+  const oilTemp = readNumber(data.oil_temp);
+  const cylTemp = readNumber(data.cylinder_temp);
 
-  document.getElementById("rpm").innerText =
-    data.rpm !== undefined ? Math.round(Number(data.rpm)) : "---";
+  setText("battery", battery !== null ? battery.toFixed(1) : "---");
+  setText("rpm", rpm !== null ? Math.round(rpm) : "---");
+  setText("oilpressure", oilPressure !== null ? oilPressure.toFixed(1) : "---");
+  setText("oiltemp", oilTemp !== null ? Math.round(oilTemp) : "---");
+  setText("cyltemp", cylTemp !== null ? Math.round(cylTemp) : "---");
 
-  document.getElementById("oilpressure").innerText =
-    data.oil_pressure !== undefined ? Number(data.oil_pressure).toFixed(1) : "---";
-
-  document.getElementById("oiltemp").innerText =
-    data.oil_temp !== undefined ? Math.round(Number(data.oil_temp)) : "---";
-
-  document.getElementById("cyltemp").innerText =
-    data.cylinder_temp !== undefined ? Math.round(Number(data.cylinder_temp)) : "---";
+  applyAlarmState("battery", "batteryIcon", battery, "low", limits.batteryWarn, limits.batteryAlarm);
+  applyAlarmState("oilpressure", "oilpressureIcon", oilPressure, "low", limits.oilPressureWarn, limits.oilPressureAlarm);
+  applyAlarmState("oiltemp", "oiltempIcon", oilTemp, "high", limits.oilTempWarn, limits.oilTempAlarm);
+  applyAlarmState("cyltemp", "cyltempIcon", cylTemp, "high", limits.cylTempWarn, limits.cylTempAlarm);
 
   marker.setLatLng([lat, lng]);
 
@@ -102,33 +115,41 @@ setInterval(() => {
   }
 }, 1000);
 
+function setText(id, value) {
+  document.getElementById(id).innerText = value;
+}
+
+function readNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isNaN(number) ? null : number;
+}
+
 function setStatus(text, isOnline) {
   const status = document.getElementById("status");
-  const dot = document.getElementById("statusDot");
+  const icon = document.getElementById("statusIcon");
 
   status.innerText = text;
   status.classList.remove("online", "offline");
-  dot.classList.remove("online-dot", "offline-dot");
+  icon.classList.remove("online", "offline");
 
   if (isOnline) {
     status.classList.add("online");
-    dot.classList.add("online-dot");
+    icon.classList.add("online");
   } else {
     status.classList.add("offline");
-    dot.classList.add("offline-dot");
+    icon.classList.add("offline");
   }
 }
 
 function setOfflineValues(statusText) {
   setStatus(statusText, false);
 
-  document.getElementById("speed").innerText = "---";
-  document.getElementById("sat").innerText = "---";
-  document.getElementById("battery").innerText = "---";
-  document.getElementById("rpm").innerText = "---";
-  document.getElementById("oilpressure").innerText = "---";
-  document.getElementById("oiltemp").innerText = "---";
-  document.getElementById("cyltemp").innerText = "---";
+  ["speed", "sat", "battery", "rpm", "oilpressure", "oiltemp", "cyltemp"].forEach(id => {
+    setText(id, "---");
+  });
+
+  ["battery", "oilpressure", "oiltemp", "cyltemp"].forEach(clearAlarmState);
 
   if (lastDataTime === 0) {
     document.getElementById("lastUpdateSmall").innerText = "---";
@@ -142,5 +163,95 @@ function setOfflineValues(statusText) {
   } else {
     mapsButton.href = "#";
     mapsButton.classList.add("disabled");
+  }
+}
+
+function applyAlarmState(valueId, iconId, value, direction, warnLimit, alarmLimit) {
+  const valueElement = document.getElementById(valueId);
+  const iconElement = document.getElementById(iconId);
+  const card = valueElement.closest(".card");
+
+  clearAlarmState(valueId);
+
+  if (value === null) return;
+
+  let alarm = false;
+  let warning = false;
+
+  if (direction === "low") {
+    alarm = value <= alarmLimit;
+    warning = value <= warnLimit && !alarm;
+  } else {
+    alarm = value >= alarmLimit;
+    warning = value >= warnLimit && !alarm;
+  }
+
+  if (alarm) {
+    card.classList.add("alarm-card");
+    valueElement.classList.add("alarm-color");
+    iconElement.classList.add("alarm-color");
+  } else if (warning) {
+    card.classList.add("warning-card");
+    valueElement.classList.add("warn-color");
+    iconElement.classList.add("warn-color");
+  }
+}
+
+function clearAlarmState(valueId) {
+  const valueElement = document.getElementById(valueId);
+  if (!valueElement) return;
+
+  const card = valueElement.closest(".card");
+  const icon = card.querySelector(".icon");
+
+  card.classList.remove("warning-card", "alarm-card");
+  valueElement.classList.remove("warn-color", "alarm-color");
+  if (icon) icon.classList.remove("warn-color", "alarm-color");
+}
+
+function setupSettingsUi() {
+  const mapping = {
+    setBatteryWarn: "batteryWarn",
+    setBatteryAlarm: "batteryAlarm",
+    setOilPressureWarn: "oilPressureWarn",
+    setOilPressureAlarm: "oilPressureAlarm",
+    setOilTempWarn: "oilTempWarn",
+    setOilTempAlarm: "oilTempAlarm",
+    setCylTempWarn: "cylTempWarn",
+    setCylTempAlarm: "cylTempAlarm"
+  };
+
+  for (const [inputId, key] of Object.entries(mapping)) {
+    document.getElementById(inputId).value = limits[key];
+  }
+
+  document.getElementById("saveSettings").addEventListener("click", () => {
+    for (const [inputId, key] of Object.entries(mapping)) {
+      const value = Number(document.getElementById(inputId).value);
+      if (!Number.isNaN(value)) limits[key] = value;
+    }
+
+    localStorage.setItem("mf35xAlarmLimits", JSON.stringify(limits));
+    alert("Alarmgrenzen gespeichert.");
+  });
+
+  document.getElementById("resetSettings").addEventListener("click", () => {
+    limits = { ...DEFAULT_LIMITS };
+    localStorage.setItem("mf35xAlarmLimits", JSON.stringify(limits));
+
+    for (const [inputId, key] of Object.entries(mapping)) {
+      document.getElementById(inputId).value = limits[key];
+    }
+
+    alert("Standardwerte geladen.");
+  });
+}
+
+function loadLimits() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("mf35xAlarmLimits"));
+    return { ...DEFAULT_LIMITS, ...(saved || {}) };
+  } catch {
+    return { ...DEFAULT_LIMITS };
   }
 }

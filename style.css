@@ -21,6 +21,11 @@ header {
   font-weight: bold;
 }
 
+.title i {
+  color: #43ff5f;
+  margin-right: 8px;
+}
+
 main {
   max-width: 1120px;
   margin: 0 auto;
@@ -41,6 +46,17 @@ main {
   min-height: 145px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   border: 1px solid rgba(255,255,255,0.04);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.card.warning-card {
+  border-color: rgba(255, 210, 75, 0.65);
+  box-shadow: 0 0 18px rgba(255, 210, 75, 0.25);
+}
+
+.card.alarm-card {
+  border-color: rgba(255, 64, 64, 0.8);
+  box-shadow: 0 0 22px rgba(255, 64, 64, 0.32);
 }
 
 .label {
@@ -50,28 +66,9 @@ main {
 }
 
 .icon {
-  font-size: 34px;
+  font-size: 36px;
   line-height: 1.1;
-  margin-bottom: 10px;
-}
-
-.status-dot {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  margin: 10px auto 12px;
-  background: #888;
-  box-shadow: 0 0 12px rgba(255,255,255,0.2);
-}
-
-.status-dot.online-dot {
-  background: #43ff5f;
-  box-shadow: 0 0 18px rgba(67,255,95,0.65);
-}
-
-.status-dot.offline-dot {
-  background: #ff4040;
-  box-shadow: 0 0 18px rgba(255,64,64,0.65);
+  margin-bottom: 12px;
 }
 
 .value {
@@ -117,6 +114,76 @@ main {
   color: #a04cff;
 }
 
+.warn-color {
+  color: #ffd24b !important;
+}
+
+.alarm-color {
+  color: #ff4040 !important;
+}
+
+.settings {
+  margin-bottom: 18px;
+  text-align: left;
+  background: linear-gradient(145deg, #202020, #171717);
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.settings summary {
+  cursor: pointer;
+  padding: 15px 18px;
+  font-weight: bold;
+  color: #e7e7e7;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  padding: 0 18px 14px;
+}
+
+.settings label {
+  font-size: 13px;
+  color: #cfcfcf;
+}
+
+.settings input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 9px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: #111;
+  color: white;
+}
+
+.save-button,
+.reset-button {
+  margin: 0 0 16px 18px;
+  padding: 11px 16px;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.save-button {
+  background: #207dff;
+}
+
+.reset-button {
+  background: #555;
+}
+
+.settings-note {
+  padding: 0 18px 16px;
+  color: #aaa;
+  font-size: 13px;
+}
+
 #map {
   height: 430px;
   width: 100%;
@@ -149,7 +216,8 @@ main {
 }
 
 @media (max-width: 900px) {
-  .cards {
+  .cards,
+  .settings-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 }
@@ -178,7 +246,7 @@ main {
   }
 
   .icon {
-    font-size: 28px;
+    font-size: 30px;
   }
 
   .value {
@@ -187,6 +255,10 @@ main {
 
   .subvalue {
     font-size: 12px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
   }
 
   #map {
