@@ -1,27 +1,18 @@
-# MF35X Live Tracker V4
+# MF35X Live Tracker V5
 
-## Enthalten
+Änderungen:
+- Kachel „Letztes Update“ entfernt
+- Letztes Update bleibt in der Status-Kachel
+- Drehzahl-Einheit: u/min
+- Öldruck-Icon geändert
+- Drehzahl-Icon geändert
+- Dashboard mit 8 Kacheln
 
-- Modernes Dashboard mit Visualisierungen
-- Status mit LED-Punkt
-- Geschwindigkeit
-- Satelliten
-- Letztes Update
-- Batteriespannung
-- Drehzahl in u/min
-- Öldruck
-- Öltemperatur
-- Zylindertemperatur
-- OpenStreetMap
-- Google-Maps-Link
-
-## Erwartete Firebase-Felder
+## Firebase-Felder
 
 Pfad:
 
 `tracker/live`
-
-Felder:
 
 ```json
 {
@@ -36,5 +27,3 @@ Felder:
   "cylinder_temp": 145
 }
 ```
-
-Nicht vorhandene Werte werden als `---` angezeigt.

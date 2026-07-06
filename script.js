@@ -56,7 +56,6 @@ onValue(liveRef, (snapshot) => {
 
   const now = new Date();
   const timeText = now.toLocaleTimeString("de-AT");
-  document.getElementById("lastUpdateCard").innerText = timeText;
   document.getElementById("lastUpdateSmall").innerText = timeText;
 
   document.getElementById("battery").innerText =
@@ -132,7 +131,6 @@ function setOfflineValues(statusText) {
   document.getElementById("cyltemp").innerText = "---";
 
   if (lastDataTime === 0) {
-    document.getElementById("lastUpdateCard").innerText = "---";
     document.getElementById("lastUpdateSmall").innerText = "---";
   }
 

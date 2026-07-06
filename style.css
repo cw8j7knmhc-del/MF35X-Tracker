@@ -79,10 +79,6 @@ main {
   font-weight: bold;
 }
 
-.value.small {
-  font-size: 20px;
-}
-
 .subvalue {
   margin-top: 12px;
   font-size: 14px;
@@ -187,10 +183,6 @@ main {
 
   .value {
     font-size: 20px;
-  }
-
-  .value.small {
-    font-size: 16px;
   }
 
   .subvalue {
