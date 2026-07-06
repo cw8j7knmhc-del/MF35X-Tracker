@@ -64,3 +64,19 @@ document.getElementById("status").innerText = "Online";
   const mapsLink = "https://www.google.com/maps?q=" + lat + "," + lng;
   document.getElementById("mapsButton").href = mapsLink;
 });
+setInterval(() => {
+  const status = document.getElementById("status");
+
+  if (lastDataTime === 0) {
+    status.innerText = "Keine Daten";
+    return;
+  }
+
+  const ageSeconds = (Date.now() - lastDataTime) / 1000;
+
+  if (ageSeconds > 10) {
+    status.innerText = "Offline";
+  } else {
+    status.innerText = "Online";
+  }
+}, 1000);
