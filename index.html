@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MF35X Live Tracker</title>
+  <title>MF35X Live Tracker V7</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
@@ -13,9 +13,15 @@
 <body>
   <header>
     <div class="title"><i class="fa-solid fa-tractor"></i> MF35X Live Tracker</div>
+    <div class="version">Version 7</div>
   </header>
 
   <main>
+    <div id="alarmBanner" class="alarm-banner hidden">
+      <i class="fa-solid fa-triangle-exclamation"></i>
+      <span id="alarmText">Alarm</span>
+    </div>
+
     <section class="cards">
 
       <div class="card">
@@ -23,6 +29,20 @@
         <i class="fa-solid fa-circle icon" id="statusIcon"></i>
         <div class="value" id="status">Warte...</div>
         <div class="subvalue">Letztes Update: <span id="lastUpdateSmall">---</span></div>
+      </div>
+
+      <div class="card">
+        <div class="label">Verbindung</div>
+        <i class="fa-solid fa-wifi icon blue" id="connectionIcon"></i>
+        <div class="value" id="connection">---</div>
+        <div class="subvalue">RSSI: <span id="wifiRssi">---</span> dBm</div>
+      </div>
+
+      <div class="card">
+        <div class="label">GPS-Qualität</div>
+        <i class="fa-solid fa-location-crosshairs icon purple" id="gpsQualityIcon"></i>
+        <div class="value" id="gpsQuality">---</div>
+        <div class="subvalue">HDOP: <span id="hdop">---</span></div>
       </div>
 
       <div class="card">
@@ -74,51 +94,35 @@
         <summary><i class="fa-solid fa-sliders"></i> Alarmgrenzen einstellen</summary>
 
         <div class="settings-grid">
-          <label>
-            Batterie Warnung unter (V)
-            <input id="setBatteryWarn" type="number" step="0.1" />
-          </label>
-
-          <label>
-            Batterie Alarm unter (V)
-            <input id="setBatteryAlarm" type="number" step="0.1" />
-          </label>
-
-          <label>
-            Öldruck Warnung unter (bar)
-            <input id="setOilPressureWarn" type="number" step="0.1" />
-          </label>
-
-          <label>
-            Öldruck Alarm unter (bar)
-            <input id="setOilPressureAlarm" type="number" step="0.1" />
-          </label>
-
-          <label>
-            Öltemperatur Warnung ab (°C)
-            <input id="setOilTempWarn" type="number" step="1" />
-          </label>
-
-          <label>
-            Öltemperatur Alarm ab (°C)
-            <input id="setOilTempAlarm" type="number" step="1" />
-          </label>
-
-          <label>
-            Zylindertemp. Warnung ab (°C)
-            <input id="setCylTempWarn" type="number" step="1" />
-          </label>
-
-          <label>
-            Zylindertemp. Alarm ab (°C)
-            <input id="setCylTempAlarm" type="number" step="1" />
-          </label>
+          <label>Batterie Warnung unter (V)<input id="setBatteryWarn" type="number" step="0.1" /></label>
+          <label>Batterie Alarm unter (V)<input id="setBatteryAlarm" type="number" step="0.1" /></label>
+          <label>Öldruck Warnung unter (bar)<input id="setOilPressureWarn" type="number" step="0.1" /></label>
+          <label>Öldruck Alarm unter (bar)<input id="setOilPressureAlarm" type="number" step="0.1" /></label>
+          <label>Öltemperatur Warnung ab (°C)<input id="setOilTempWarn" type="number" step="1" /></label>
+          <label>Öltemperatur Alarm ab (°C)<input id="setOilTempAlarm" type="number" step="1" /></label>
+          <label>Zylindertemp. Warnung ab (°C)<input id="setCylTempWarn" type="number" step="1" /></label>
+          <label>Zylindertemp. Alarm ab (°C)<input id="setCylTempAlarm" type="number" step="1" /></label>
         </div>
 
         <button id="saveSettings" class="save-button">Grenzen speichern</button>
         <button id="resetSettings" class="reset-button">Standardwerte laden</button>
         <div class="settings-note">Die Werte werden lokal im Browser gespeichert.</div>
       </details>
+    </section>
+
+    <section class="charts">
+      <div class="chart-card">
+        <div class="chart-title">Drehzahl Verlauf</div>
+        <canvas id="rpmChart" width="500" height="160"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Öldruck Verlauf</div>
+        <canvas id="oilPressureChart" width="500" height="160"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Öltemperatur Verlauf</div>
+        <canvas id="oilTempChart" width="500" height="160"></canvas>
+      </div>
     </section>
 
     <section id="map"></section>
@@ -128,11 +132,11 @@
     </a>
 
     <div class="footer">
-      Tracker V6 · Font-Awesome-Icons · frei einstellbare Alarmgrenzen
+      Tracker V7 · Alarmbanner · Trenddiagramme · GPS-Qualität · Verbindungsstatus
     </div>
   </main>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script type="module" src="script.js"></script>
+  <script type="module" src="script.js?v=7"></script>
 </body>
 </html>
