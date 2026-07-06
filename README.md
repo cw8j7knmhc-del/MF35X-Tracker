@@ -1,21 +1,22 @@
-# MF35X Live Tracker V7 NEU
+# MF35X Live Tracker V8
 
-Wenn du nach dem Hochladen noch V6 siehst, öffne die Seite mit:
+## Neu gegenüber V7
 
-`https://cw8j7knmhc-del.github.io/MF35X-Tracker/?v=7`
+- Drehzahl-Verlauf entfernt
+- Öldruck-Verlauf entfernt
+- Zylindertemperatur-Verlauf hinzugefügt
+- Öltemperatur-Verlauf bleibt erhalten
+- Eigenes Traktorbild als Karten-Marker und Header-Symbol eingebaut
 
-und lade mit Strg + F5 neu.
+## Dateien
 
-## Enthalten
+Diese Dateien müssen in GitHub liegen:
 
-- Version-7-Markierung oben sichtbar
-- Alarmbanner
-- Trenddiagramme für Drehzahl, Öldruck, Öltemperatur
-- GPS-Qualität über `hdop`
-- WLAN-/Verbindungsstatus über `wifi_rssi`
-- Kein Nachtmodus
-- Kein eigenes Traktorsymbol
-- Kein Runden-/Fahrtenprotokoll
+- `index.html`
+- `style.css`
+- `script.js`
+- `README.md`
+- `tractor.png`
 
 ## Erwartete Firebase-Felder
 

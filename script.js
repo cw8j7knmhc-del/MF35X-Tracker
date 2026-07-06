@@ -26,7 +26,7 @@ const DEFAULT_LIMITS = {
 };
 
 let limits = loadLimits();
-let history = { rpm: [], oilPressure: [], oilTemp: [] };
+let history = { oilTemp: [], cylTemp: [] };
 const HISTORY_MAX = 60;
 
 let map = L.map("map").setView([48.2, 16.3], 15);
@@ -35,7 +35,15 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap"
 }).addTo(map);
 
-let marker = L.marker([48.2, 16.3]).addTo(map);
+const tractorIcon = L.icon({
+  iconUrl: "tractor.png",
+  iconSize: [76, 76],
+  iconAnchor: [38, 38],
+  popupAnchor: [0, -32],
+  className: "leaflet-custom-tractor"
+});
+
+let marker = L.marker([48.2, 16.3], { icon: tractorIcon }).addTo(map);
 let firstPosition = true;
 let lastDataTime = 0;
 let lastValidPosition = null;
@@ -91,12 +99,10 @@ onValue(liveRef, (snapshot) => {
   applyAlarmState("cyltemp", "cyltempIcon", cylTemp, "high", limits.cylTempWarn, limits.cylTempAlarm, "Zylindertemperatur", "°C", alarms);
   updateAlarmBanner(alarms);
 
-  addHistory("rpm", rpm);
-  addHistory("oilPressure", oilPressure);
   addHistory("oilTemp", oilTemp);
-  drawChart("rpmChart", history.rpm, "U/min");
-  drawChart("oilPressureChart", history.oilPressure, "bar");
+  addHistory("cylTemp", cylTemp);
   drawChart("oilTempChart", history.oilTemp, "°C");
+  drawChart("cylTempChart", history.cylTemp, "°C");
 
   marker.setLatLng([lat, lng]);
   if (firstPosition) {

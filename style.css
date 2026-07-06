@@ -14,8 +14,21 @@ header {
   border-bottom: 1px solid #262626;
 }
 
-.title { font-size: 26px; font-weight: bold; }
-.title i { color: #43ff5f; margin-right: 8px; }
+.title {
+  font-size: 26px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.title-tractor {
+  height: 42px;
+  width: auto;
+  object-fit: contain;
+}
+
 .version { color: #aaa; margin-top: 4px; font-size: 13px; }
 
 main { max-width: 1120px; margin: 0 auto; padding: 14px; }
@@ -134,7 +147,7 @@ main { max-width: 1120px; margin: 0 auto; padding: 14px; }
 
 .charts {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 14px;
   margin-bottom: 18px;
 }
@@ -166,6 +179,11 @@ main { max-width: 1120px; margin: 0 auto; padding: 14px; }
   border: 1px solid rgba(255,255,255,0.08);
 }
 
+.leaflet-custom-tractor {
+  background: transparent;
+  border: none;
+}
+
 .button {
   display: block;
   margin: 16px 0;
@@ -192,6 +210,7 @@ main { max-width: 1120px; margin: 0 auto; padding: 14px; }
   .cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .card { min-height: 130px; padding: 14px 10px; }
   .title { font-size: 22px; }
+  .title-tractor { height: 34px; }
   .label { font-size: 13px; }
   .icon { font-size: 30px; }
   .value { font-size: 20px; }

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MF35X Live Tracker V7</title>
+  <title>MF35X Live Tracker V8</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
@@ -12,8 +12,8 @@
 
 <body>
   <header>
-    <div class="title"><i class="fa-solid fa-tractor"></i> MF35X Live Tracker</div>
-    <div class="version">Version 7</div>
+    <div class="title"><img src="tractor.png" class="title-tractor" alt="Traktor" /> MF35X Live Tracker</div>
+    <div class="version">Version 8</div>
   </header>
 
   <main>
@@ -112,16 +112,12 @@
 
     <section class="charts">
       <div class="chart-card">
-        <div class="chart-title">Drehzahl Verlauf</div>
-        <canvas id="rpmChart" width="500" height="160"></canvas>
-      </div>
-      <div class="chart-card">
-        <div class="chart-title">Öldruck Verlauf</div>
-        <canvas id="oilPressureChart" width="500" height="160"></canvas>
-      </div>
-      <div class="chart-card">
         <div class="chart-title">Öltemperatur Verlauf</div>
         <canvas id="oilTempChart" width="500" height="160"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Zylindertemperatur Verlauf</div>
+        <canvas id="cylTempChart" width="500" height="160"></canvas>
       </div>
     </section>
 
@@ -132,11 +128,11 @@
     </a>
 
     <div class="footer">
-      Tracker V7 · Alarmbanner · Trenddiagramme · GPS-Qualität · Verbindungsstatus
+      Tracker V8 · Traktor-Marker · Öltemperatur/Zylindertemperatur-Verlauf
     </div>
   </main>
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script type="module" src="script.js?v=7"></script>
+  <script type="module" src="script.js?v=8"></script>
 </body>
 </html>
