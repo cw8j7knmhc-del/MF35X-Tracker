@@ -88,23 +88,42 @@ async function saveSettings() {
 }
 
 async function resetMaxValues() {
-  const snapshot = await get(ref(db, "tracker/live"));
-  const live = snapshot.val() || {};
+  const button = document.getElementById("resetMaxValues");
+  button.disabled = true;
+  button.innerText = "Wird zurückgesetzt...";
 
-  const resetValues = {
-    maxSpeed: readLiveNumber(live.speed_kmh),
-    maxRpm: readLiveNumber(live.rpm),
-    maxOilTemp: readLiveNumber(live.oil_temp),
-    maxCylTemp: readLiveNumber(live.cylinder_temp),
-    minOilPressure: readLiveNumber(live.oil_pressure),
-    minBattery: readLiveNumber(live.battery_v),
-    resetAt: Date.now()
-  };
+  try {
+    const snapshot = await get(ref(db, "tracker/live"));
+    const live = snapshot.val() || {};
+    const resetAt = Date.now();
 
-  await set(ref(db, "tracker/maxValues"), resetValues);
-  await set(ref(db, "tracker/maxReset"), { resetAt: Date.now() });
+    const resetValues = {
+      maxSpeed: readLiveNumber(live.speed_kmh),
+      maxRpm: readLiveNumber(live.rpm),
+      maxOilTemp: readLiveNumber(live.oil_temp),
+      maxCylTemp: readLiveNumber(live.cylinder_temp),
+      minOilPressure: readLiveNumber(live.oil_pressure),
+      minBattery: readLiveNumber(live.battery_v),
+      resetAt: resetAt
+    };
 
-  alert("Maximalwerte wurden zurückgesetzt.");
+    // 1. Werte direkt zurücksetzen
+    await set(ref(db, "tracker/maxValues"), resetValues);
+
+    // 2. Befehl an alle geöffneten Besucher-Seiten senden.
+    // Dadurch überschreibt keine geöffnete Besucher-Seite den Reset wieder mit alten Maximalwerten.
+    await set(ref(db, "tracker/commands/resetMaxValues"), {
+      resetAt: resetAt,
+      source: "admin"
+    });
+
+    alert("Maximalwerte wurden zurückgesetzt.");
+  } catch (error) {
+    alert("Fehler beim Zurücksetzen: " + error.message);
+  } finally {
+    button.disabled = false;
+    button.innerText = "Zurücksetzen";
+  }
 }
 
 function listenMaxValues() {
