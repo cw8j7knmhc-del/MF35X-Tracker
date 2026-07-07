@@ -1,11 +1,1 @@
-{
-  "name": "MF35X Live Tracker",
-  "short_name": "MF35X Tracker",
-  "start_url": ".",
-  "display": "standalone",
-  "background_color": "#111111",
-  "theme_color": "#111111",
-  "icons": [
-    {"src": "tractor.png", "sizes": "512x512", "type": "image/png"}
-  ]
-}
+{"name":"MF35X Live Tracker","short_name":"MF35X Tracker","start_url":".","display":"standalone","background_color":"#111111","theme_color":"#111111","icons":[{"src":"tractor.png","sizes":"512x512","type":"image/png"}]}

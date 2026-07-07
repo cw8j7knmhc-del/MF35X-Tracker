@@ -1,14 +1,10 @@
-# MF35X Live Tracker V9.2
+# MF35X Live Tracker V9.3 Admin
 
-Neu gegenüber V9.1:
-- Benachrichtigungen können direkt auf der Website EIN/AUS geschaltet werden.
-- Wenn AUS, werden keine Browser-Benachrichtigungen ausgelöst.
-- Browser-Berechtigung kann weiterhin über die Browser-Einstellungen blockiert werden.
+Neu:
+- `index.html` Besucheransicht
+- `admin.html` Adminseite
+- Admin-Passwort in `admin.js`: `mf35x`
+- Alarmgrenzen, Maximalwerte und Alarmhistorie liegen zentral in Firebase.
 
-Dateien für GitHub:
-- index.html
-- style.css
-- script.js
-- manifest.json
-- README.md
-- tractor.png
+Wichtig:
+Der Passwortschutz ist ein einfacher Schutz für GitHub Pages. Für echte Schreibrechte brauchen wir später Firebase Authentication und strengere Firebase-Regeln.
