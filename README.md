@@ -1,4 +1,4 @@
-# MF35X Live Tracker V9.5 Admin
+# MF35X Live Tracker V9.3 Admin
 
 Neu:
 - `index.html` Besucheransicht
@@ -8,11 +8,3 @@ Neu:
 
 Wichtig:
 Der Passwortschutz ist ein einfacher Schutz für GitHub Pages. Für echte Schreibrechte brauchen wir später Firebase Authentication und strengere Firebase-Regeln.
-
-
-## Neu in V9.5
-
-- Keine grüne Live-Route
-- Keine Route-Punkte-Anzeige
-- Statt OpenStreetMap wird ein Google-Maps-Fenster verwendet
-- Das Google-Maps-Fenster springt automatisch zur aktuellen Position
