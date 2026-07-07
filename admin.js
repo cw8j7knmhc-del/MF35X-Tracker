@@ -1,7 +1,159 @@
-import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";import{getDatabase,ref,onValue,set,get}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";import{firebaseConfig}from"./firebase-config.js";
-const ADMIN_PASSWORD="mf35x",DEF={batteryWarn:12.2,batteryAlarm:11.8,oilPressureWarn:2,oilPressureAlarm:1.2,oilTempWarn:110,oilTempAlarm:125,cylTempWarn:180,cylTempAlarm:220};const db=getDatabase(initializeApp(firebaseConfig));
-document.getElementById("loginButton").onclick=()=>{if(document.getElementById("adminPassword").value===ADMIN_PASSWORD){sessionStorage.setItem("mf35xAdmin","true");show();}else alert("Falsches Passwort.")};if(sessionStorage.getItem("mf35xAdmin")==="true")show();
-function show(){document.getElementById("loginBox").classList.add("hidden");document.getElementById("adminContent").classList.remove("hidden");init()}function init(){onValue(ref(db,"tracker/settings"),s=>fill({...DEF,...(s.val()||{})}));onValue(ref(db,"tracker/maxValues"),s=>renderMax(s.val()||{}));onValue(ref(db,"tracker/alarmHistory"),s=>renderHist(s.val()||[]));document.getElementById("saveSettings").onclick=save;document.getElementById("resetSettings").onclick=()=>set(ref(db,"tracker/settings"),DEF);document.getElementById("resetMaxValues").onclick=async()=>{const s=await get(ref(db,"tracker/live"));const d=s.val()||{};const n=v=>{if(v===undefined||v===null||v==="")return null;const x=Number(v);return Number.isNaN(x)?null:x};await set(ref(db,"tracker/maxValues"),{maxSpeed:n(d.speed_kmh),maxRpm:n(d.rpm),maxOilTemp:n(d.oil_temp),maxCylTemp:n(d.cylinder_temp),minOilPressure:n(d.oil_pressure),minBattery:n(d.battery_v),resetTime:new Date().toLocaleTimeString("de-AT")});alert("Maximalwerte auf aktuellen Stand zurückgesetzt.");};document.getElementById("clearAlarmHistory").onclick=()=>set(ref(db,"tracker/alarmHistory"),[])}
-function fill(s){val("setBatteryWarn",s.batteryWarn);val("setBatteryAlarm",s.batteryAlarm);val("setOilPressureWarn",s.oilPressureWarn);val("setOilPressureAlarm",s.oilPressureAlarm);val("setOilTempWarn",s.oilTempWarn);val("setOilTempAlarm",s.oilTempAlarm);val("setCylTempWarn",s.cylTempWarn);val("setCylTempAlarm",s.cylTempAlarm)}function save(){set(ref(db,"tracker/settings"),{batteryWarn:num("setBatteryWarn"),batteryAlarm:num("setBatteryAlarm"),oilPressureWarn:num("setOilPressureWarn"),oilPressureAlarm:num("setOilPressureAlarm"),oilTempWarn:num("setOilTempWarn"),oilTempAlarm:num("setOilTempAlarm"),cylTempWarn:num("setCylTempWarn"),cylTempAlarm:num("setCylTempAlarm")});alert("Gespeichert.")}
-function renderMax(m){txt("maxSpeed",m.maxSpeed!=null?Number(m.maxSpeed).toFixed(1):"---");txt("maxRpm",m.maxRpm!=null?Math.round(m.maxRpm):"---");txt("maxOilTemp",m.maxOilTemp!=null?Math.round(m.maxOilTemp):"---");txt("maxCylTemp",m.maxCylTemp!=null?Math.round(m.maxCylTemp):"---");txt("minOilPressure",m.minOilPressure!=null?Number(m.minOilPressure).toFixed(1):"---");txt("minBattery",m.minBattery!=null?Number(m.minBattery).toFixed(1):"---")}function renderHist(ar){let c=document.getElementById("alarmHistory");if(!ar.length){c.innerHTML='<div class="empty-history">Noch keine Alarme.</div>';return}c.innerHTML=ar.map(e=>`<div class="alarm-entry ${e.level==="warning"?"warning-entry":""}"><div class="alarm-time">${e.time}</div><div class="alarm-message">${e.text}</div></div>`).join("")}
-function val(id,v){document.getElementById(id).value=v}function num(id){return Number(document.getElementById(id).value)}function txt(id,v){document.getElementById(id).innerText=v}
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { firebaseConfig } from "./firebase-config.js";
+
+const ADMIN_PASSWORD = "mf35x";
+
+const DEFAULT_LIMITS = {
+  batteryWarn: 12.2,
+  batteryAlarm: 11.8,
+  oilPressureWarn: 2.0,
+  oilPressureAlarm: 1.2,
+  oilTempWarn: 110,
+  oilTempAlarm: 125,
+  cylTempWarn: 180,
+  cylTempAlarm: 220
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+let adminStarted = false;
+
+document.getElementById("loginButton").addEventListener("click", () => {
+  const enteredPassword = document.getElementById("adminPassword").value;
+
+  if (enteredPassword === ADMIN_PASSWORD) {
+    document.getElementById("loginBox").classList.add("hidden");
+    document.getElementById("adminContent").classList.remove("hidden");
+
+    if (!adminStarted) {
+      adminStarted = true;
+      initAdmin();
+    }
+  } else {
+    alert("Falsches Passwort.");
+  }
+});
+
+function initAdmin() {
+  listenSettings();
+  listenMaxValues();
+  listenAlarmHistory();
+
+  document.getElementById("saveSettings").addEventListener("click", saveSettings);
+
+  document.getElementById("resetSettings").addEventListener("click", async () => {
+    await set(ref(db, "tracker/settings"), DEFAULT_LIMITS);
+    alert("Standardwerte geladen.");
+  });
+
+  document.getElementById("resetMaxValues").addEventListener("click", resetMaxValues);
+
+  document.getElementById("clearAlarmHistory").addEventListener("click", async () => {
+    await set(ref(db, "tracker/alarmHistory"), []);
+    alert("Alarmhistorie geleert.");
+  });
+}
+
+function listenSettings() {
+  onValue(ref(db, "tracker/settings"), snapshot => {
+    const settings = { ...DEFAULT_LIMITS, ...(snapshot.val() || {}) };
+
+    setInput("setBatteryWarn", settings.batteryWarn);
+    setInput("setBatteryAlarm", settings.batteryAlarm);
+    setInput("setOilPressureWarn", settings.oilPressureWarn);
+    setInput("setOilPressureAlarm", settings.oilPressureAlarm);
+    setInput("setOilTempWarn", settings.oilTempWarn);
+    setInput("setOilTempAlarm", settings.oilTempAlarm);
+    setInput("setCylTempWarn", settings.cylTempWarn);
+    setInput("setCylTempAlarm", settings.cylTempAlarm);
+  });
+}
+
+async function saveSettings() {
+  const settings = {
+    batteryWarn: readInput("setBatteryWarn"),
+    batteryAlarm: readInput("setBatteryAlarm"),
+    oilPressureWarn: readInput("setOilPressureWarn"),
+    oilPressureAlarm: readInput("setOilPressureAlarm"),
+    oilTempWarn: readInput("setOilTempWarn"),
+    oilTempAlarm: readInput("setOilTempAlarm"),
+    cylTempWarn: readInput("setCylTempWarn"),
+    cylTempAlarm: readInput("setCylTempAlarm")
+  };
+
+  await set(ref(db, "tracker/settings"), settings);
+  alert("Alarmgrenzen gespeichert.");
+}
+
+async function resetMaxValues() {
+  const snapshot = await get(ref(db, "tracker/live"));
+  const live = snapshot.val() || {};
+
+  const readNumber = (value) => {
+    if (value === undefined || value === null || value === "") return null;
+    const number = Number(value);
+    return Number.isNaN(number) ? null : number;
+  };
+
+  const resetValues = {
+    maxSpeed: readNumber(live.speed_kmh),
+    maxRpm: readNumber(live.rpm),
+    maxOilTemp: readNumber(live.oil_temp),
+    maxCylTemp: readNumber(live.cylinder_temp),
+    minOilPressure: readNumber(live.oil_pressure),
+    minBattery: readNumber(live.battery_v),
+    resetTime: new Date().toLocaleTimeString("de-AT")
+  };
+
+  await set(ref(db, "tracker/maxValues"), resetValues);
+  alert("Maximalwerte wurden auf den aktuellen Stand zurückgesetzt.");
+}
+
+function listenMaxValues() {
+  onValue(ref(db, "tracker/maxValues"), snapshot => {
+    const maxValues = snapshot.val() || {};
+
+    setText("maxSpeed", maxValues.maxSpeed != null ? Number(maxValues.maxSpeed).toFixed(1) : "---");
+    setText("maxRpm", maxValues.maxRpm != null ? Math.round(maxValues.maxRpm) : "---");
+    setText("maxOilTemp", maxValues.maxOilTemp != null ? Math.round(maxValues.maxOilTemp) : "---");
+    setText("maxCylTemp", maxValues.maxCylTemp != null ? Math.round(maxValues.maxCylTemp) : "---");
+    setText("minOilPressure", maxValues.minOilPressure != null ? Number(maxValues.minOilPressure).toFixed(1) : "---");
+    setText("minBattery", maxValues.minBattery != null ? Number(maxValues.minBattery).toFixed(1) : "---");
+  });
+}
+
+function listenAlarmHistory() {
+  onValue(ref(db, "tracker/alarmHistory"), snapshot => {
+    renderAlarmHistory(snapshot.val() || []);
+  });
+}
+
+function renderAlarmHistory(history) {
+  const container = document.getElementById("alarmHistory");
+
+  if (!history.length) {
+    container.innerHTML = '<div class="empty-history">Noch keine Alarme.</div>';
+    return;
+  }
+
+  container.innerHTML = history.map(entry => `
+    <div class="alarm-entry ${entry.level === "warning" ? "warning-entry" : ""}">
+      <div class="alarm-time">${entry.time}</div>
+      <div class="alarm-message">${entry.text}</div>
+    </div>
+  `).join("");
+}
+
+function setInput(id, value) {
+  document.getElementById(id).value = value;
+}
+
+function readInput(id) {
+  return Number(document.getElementById(id).value);
+}
+
+function setText(id, value) {
+  document.getElementById(id).innerText = value;
+}
