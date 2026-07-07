@@ -1,3 +1,4 @@
+/* MF35X Tracker Admin V9.3.5 Reset-Fix */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -89,6 +90,8 @@ async function saveSettings() {
 
 async function resetMaxValues() {
   const button = document.getElementById("resetMaxValues");
+  const originalText = button.innerText;
+
   button.disabled = true;
   button.innerText = "Wird zurückgesetzt...";
 
@@ -107,22 +110,14 @@ async function resetMaxValues() {
       resetAt: resetAt
     };
 
-    // 1. Werte direkt zurücksetzen
     await set(ref(db, "tracker/maxValues"), resetValues);
 
-    // 2. Befehl an alle geöffneten Besucher-Seiten senden.
-    // Dadurch überschreibt keine geöffnete Besucher-Seite den Reset wieder mit alten Maximalwerten.
-    await set(ref(db, "tracker/commands/resetMaxValues"), {
-      resetAt: resetAt,
-      source: "admin"
-    });
-
-    alert("Maximalwerte wurden zurückgesetzt.");
+    alert("Maximalwerte wurden auf die aktuellen Live-Werte zurückgesetzt.");
   } catch (error) {
     alert("Fehler beim Zurücksetzen: " + error.message);
   } finally {
     button.disabled = false;
-    button.innerText = "Zurücksetzen";
+    button.innerText = originalText;
   }
 }
 
