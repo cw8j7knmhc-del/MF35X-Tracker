@@ -91,24 +91,20 @@ async function resetMaxValues() {
   const snapshot = await get(ref(db, "tracker/live"));
   const live = snapshot.val() || {};
 
-  const readNumber = (value) => {
-    if (value === undefined || value === null || value === "") return null;
-    const number = Number(value);
-    return Number.isNaN(number) ? null : number;
-  };
-
   const resetValues = {
-    maxSpeed: readNumber(live.speed_kmh),
-    maxRpm: readNumber(live.rpm),
-    maxOilTemp: readNumber(live.oil_temp),
-    maxCylTemp: readNumber(live.cylinder_temp),
-    minOilPressure: readNumber(live.oil_pressure),
-    minBattery: readNumber(live.battery_v),
-    resetTime: new Date().toLocaleTimeString("de-AT")
+    maxSpeed: readLiveNumber(live.speed_kmh),
+    maxRpm: readLiveNumber(live.rpm),
+    maxOilTemp: readLiveNumber(live.oil_temp),
+    maxCylTemp: readLiveNumber(live.cylinder_temp),
+    minOilPressure: readLiveNumber(live.oil_pressure),
+    minBattery: readLiveNumber(live.battery_v),
+    resetAt: Date.now()
   };
 
   await set(ref(db, "tracker/maxValues"), resetValues);
-  alert("Maximalwerte wurden auf den aktuellen Stand zurückgesetzt.");
+  await set(ref(db, "tracker/maxReset"), { resetAt: Date.now() });
+
+  alert("Maximalwerte wurden zurückgesetzt.");
 }
 
 function listenMaxValues() {
@@ -144,6 +140,12 @@ function renderAlarmHistory(history) {
       <div class="alarm-message">${entry.text}</div>
     </div>
   `).join("");
+}
+
+function readLiveNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const number = Number(value);
+  return Number.isNaN(number) ? null : number;
 }
 
 function setInput(id, value) {
