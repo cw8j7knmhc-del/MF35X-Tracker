@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.4.0 – Alarmgrenzen und Aktualisierungsintervalle */
+/* MF35X Tracker Admin V9.4.1 */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -19,20 +19,21 @@ const DEFAULT_LIMITS = {
 const DEFAULT_INTERVALS = {
   rpm_output_update_ms: 10,
   rpm_firebase_update_ms: 250,
+  oil_pressure_update_ms: 100,
   temperature_update_ms: 1000,
   gps_update_ms: 1000
 };
 
 const INTERVAL_RULES = {
-  rpm_output_update_ms: { inputId: "setRpmOutputUpdateMs", min: 5, max: 200 },
-  rpm_firebase_update_ms: { inputId: "setRpmFirebaseUpdateMs", min: 100, max: 5000 },
-  temperature_update_ms: { inputId: "setTemperatureUpdateMs", min: 250, max: 10000 },
-  gps_update_ms: { inputId: "setGpsUpdateMs", min: 1000, max: 30000 }
+  rpm_output_update_ms: { id: "setRpmOutputUpdateMs", min: 5, max: 200 },
+  rpm_firebase_update_ms: { id: "setRpmFirebaseUpdateMs", min: 100, max: 5000 },
+  oil_pressure_update_ms: { id: "setOilPressureUpdateMs", min: 50, max: 5000 },
+  temperature_update_ms: { id: "setTemperatureUpdateMs", min: 250, max: 10000 },
+  gps_update_ms: { id: "setGpsUpdateMs", min: 1000, max: 30000 }
 };
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
-
 let adminStarted = false;
 
 document.getElementById("loginButton").addEventListener("click", login);
@@ -63,21 +64,18 @@ function initAdmin() {
   listenAlarmHistory();
 
   document.getElementById("saveSettings").addEventListener("click", saveSettings);
-
   document.getElementById("resetSettings").addEventListener("click", async () => {
     await set(ref(db, "tracker/settings"), DEFAULT_LIMITS);
     alert("Standardwerte geladen.");
   });
 
   document.getElementById("saveIntervals").addEventListener("click", saveIntervals);
-
   document.getElementById("resetIntervals").addEventListener("click", async () => {
     await set(ref(db, "tracker/config/intervals"), DEFAULT_INTERVALS);
-    setIntervalStatus("Standardintervalle wurden gespeichert.", "success");
+    setIntervalStatus("Standardintervalle gespeichert.", "success");
   });
 
   document.getElementById("resetMaxValues").addEventListener("click", resetMaxValues);
-
   document.getElementById("clearAlarmHistory").addEventListener("click", async () => {
     await set(ref(db, "tracker/alarmHistory"), []);
     alert("Alarmhistorie geleert.");
@@ -87,7 +85,6 @@ function initAdmin() {
 function listenSettings() {
   onValue(ref(db, "tracker/settings"), snapshot => {
     const settings = { ...DEFAULT_LIMITS, ...(snapshot.val() || {}) };
-
     setInput("setBatteryWarn", settings.batteryWarn);
     setInput("setBatteryAlarm", settings.batteryAlarm);
     setInput("setOilPressureWarn", settings.oilPressureWarn);
@@ -118,31 +115,23 @@ async function saveSettings() {
 function listenIntervals() {
   const intervalsRef = ref(db, "tracker/config/intervals");
 
-  onValue(
-    intervalsRef,
-    async snapshot => {
-      const stored = snapshot.val();
+  onValue(intervalsRef, async snapshot => {
+    const stored = snapshot.val();
 
-      if (!stored) {
-        try {
-          await set(intervalsRef, DEFAULT_INTERVALS);
-          return;
-        } catch (error) {
-          loadIntervalInputs(DEFAULT_INTERVALS);
-          setIntervalStatus("Standardwerte angezeigt, aber Firebase konnte nicht initialisiert werden.", "error");
-          return;
-        }
-      }
-
-      const intervals = { ...DEFAULT_INTERVALS, ...stored };
-      loadIntervalInputs(intervals);
-      setIntervalStatus("Intervalle aus Firebase geladen.", "success");
-    },
-    error => {
-      loadIntervalInputs(DEFAULT_INTERVALS);
-      setIntervalStatus("Firebase-Lesefehler: " + error.message, "error");
+    if (!stored) {
+      await set(intervalsRef, DEFAULT_INTERVALS);
+      return;
     }
-  );
+
+    const values = { ...DEFAULT_INTERVALS, ...stored };
+    for (const [key, rule] of Object.entries(INTERVAL_RULES)) {
+      setInput(rule.id, values[key]);
+    }
+
+    setIntervalStatus("Intervalle aus Firebase geladen.", "success");
+  }, error => {
+    setIntervalStatus("Firebase-Lesefehler: " + error.message, "error");
+  });
 }
 
 async function saveIntervals() {
@@ -150,7 +139,7 @@ async function saveIntervals() {
     const intervals = {};
 
     for (const [key, rule] of Object.entries(INTERVAL_RULES)) {
-      intervals[key] = readBoundedInteger(rule.inputId, rule.min, rule.max);
+      intervals[key] = readBoundedInteger(rule.id, rule.min, rule.max);
     }
 
     setIntervalStatus("Wird gespeichert…", "pending");
@@ -162,22 +151,16 @@ async function saveIntervals() {
   }
 }
 
-function loadIntervalInputs(intervals) {
-  for (const [key, rule] of Object.entries(INTERVAL_RULES)) {
-    setInput(rule.inputId, intervals[key]);
-  }
-}
-
-function readBoundedInteger(inputId, min, max) {
-  const input = document.getElementById(inputId);
+function readBoundedInteger(id, min, max) {
+  const input = document.getElementById(id);
   const value = Number(input.value);
 
-  if (!Number.isFinite(value) || !Number.isInteger(value)) {
-    throw new Error(`Bitte bei „${input.closest("label").childNodes[0].textContent.trim()}“ eine ganze Zahl eingeben.`);
+  if (!Number.isInteger(value)) {
+    throw new Error("Bitte nur ganze Millisekundenwerte eingeben.");
   }
 
   if (value < min || value > max) {
-    throw new Error(`Der Wert bei „${input.closest("label").childNodes[0].textContent.trim()}“ muss zwischen ${min} und ${max} ms liegen.`);
+    throw new Error(`Der Wert muss zwischen ${min} und ${max} ms liegen.`);
   }
 
   return value;
@@ -187,33 +170,29 @@ function setIntervalStatus(text, state = "") {
   const element = document.getElementById("intervalStatus");
   element.textContent = text;
   element.className = "config-status";
-
   if (state) element.classList.add(`config-status-${state}`);
 }
 
 async function resetMaxValues() {
   const button = document.getElementById("resetMaxValues");
   const originalText = button.innerText;
-
   button.disabled = true;
   button.innerText = "Wird zurückgesetzt...";
 
   try {
     const snapshot = await get(ref(db, "tracker/live"));
     const live = snapshot.val() || {};
-    const resetAt = Date.now();
 
-    const resetValues = {
+    await set(ref(db, "tracker/maxValues"), {
       maxSpeed: readLiveNumber(live.speed_kmh),
       maxRpm: readLiveNumber(live.rpm),
       maxOilTemp: readLiveNumber(live.oil_temp),
       maxCylTemp: readLiveNumber(live.cylinder_temp),
       minOilPressure: readLiveNumber(live.oil_pressure),
       minBattery: readLiveNumber(live.battery_v),
-      resetAt
-    };
+      resetAt: Date.now()
+    });
 
-    await set(ref(db, "tracker/maxValues"), resetValues);
     alert("Maximalwerte wurden auf die aktuellen Live-Werte zurückgesetzt.");
   } catch (error) {
     alert("Fehler beim Zurücksetzen: " + error.message);
@@ -225,37 +204,33 @@ async function resetMaxValues() {
 
 function listenMaxValues() {
   onValue(ref(db, "tracker/maxValues"), snapshot => {
-    const maxValues = snapshot.val() || {};
-
-    setText("maxSpeed", maxValues.maxSpeed != null ? Number(maxValues.maxSpeed).toFixed(1) : "---");
-    setText("maxRpm", maxValues.maxRpm != null ? Math.round(maxValues.maxRpm) : "---");
-    setText("maxOilTemp", maxValues.maxOilTemp != null ? Math.round(maxValues.maxOilTemp) : "---");
-    setText("maxCylTemp", maxValues.maxCylTemp != null ? Math.round(maxValues.maxCylTemp) : "---");
-    setText("minOilPressure", maxValues.minOilPressure != null ? Number(maxValues.minOilPressure).toFixed(1) : "---");
-    setText("minBattery", maxValues.minBattery != null ? Number(maxValues.minBattery).toFixed(1) : "---");
+    const m = snapshot.val() || {};
+    setText("maxSpeed", m.maxSpeed != null ? Number(m.maxSpeed).toFixed(1) : "---");
+    setText("maxRpm", m.maxRpm != null ? Math.round(m.maxRpm) : "---");
+    setText("maxOilTemp", m.maxOilTemp != null ? Math.round(m.maxOilTemp) : "---");
+    setText("maxCylTemp", m.maxCylTemp != null ? Math.round(m.maxCylTemp) : "---");
+    setText("minOilPressure", m.minOilPressure != null ? Number(m.minOilPressure).toFixed(1) : "---");
+    setText("minBattery", m.minBattery != null ? Number(m.minBattery).toFixed(1) : "---");
   });
 }
 
 function listenAlarmHistory() {
   onValue(ref(db, "tracker/alarmHistory"), snapshot => {
-    renderAlarmHistory(snapshot.val() || []);
+    const history = snapshot.val() || [];
+    const container = document.getElementById("alarmHistory");
+
+    if (!history.length) {
+      container.innerHTML = '<div class="empty-history">Noch keine Alarme.</div>';
+      return;
+    }
+
+    container.innerHTML = history.map(entry => `
+      <div class="alarm-entry ${entry.level === "warning" ? "warning-entry" : ""}">
+        <div class="alarm-time">${entry.time}</div>
+        <div class="alarm-message">${entry.text}</div>
+      </div>
+    `).join("");
   });
-}
-
-function renderAlarmHistory(history) {
-  const container = document.getElementById("alarmHistory");
-
-  if (!history.length) {
-    container.innerHTML = '<div class="empty-history">Noch keine Alarme.</div>';
-    return;
-  }
-
-  container.innerHTML = history.map(entry => `
-    <div class="alarm-entry ${entry.level === "warning" ? "warning-entry" : ""}">
-      <div class="alarm-time">${entry.time}</div>
-      <div class="alarm-message">${entry.text}</div>
-    </div>
-  `).join("");
 }
 
 function readLiveNumber(value) {
