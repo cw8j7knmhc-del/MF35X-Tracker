@@ -1,4 +1,4 @@
-# MF35X Tracker V9.4.2
+# MF35X Tracker V9.4.3
 
 ## Einstellbare Intervalle
 
@@ -38,7 +38,7 @@ GPS-Position und GPS-Geschwindigkeit werden gemeinsam aktualisiert.
 Der ESP32-Sketch muss danach einmalig an die neue Firebase-Konfiguration angepasst werden.
 
 
-## Alarmstart-Fix V9.4.2
+## Alarmstart-Fix V9.4.3
 
 Beim Öffnen der Besucheransicht werden Alarme erst geprüft, wenn sowohl
 
@@ -49,3 +49,18 @@ geladen wurden.
 
 Dadurch erscheint beim Seitenstart kein kurzzeitiger falscher Öldruckalarm und es
 wird auch kein falscher Eintrag in der Alarmhistorie erzeugt.
+
+
+## Öldruckalarm-Fix V9.4.3
+
+Der Öldruckalarm wird nur ausgewertet, wenn:
+
+- eine gültige Drehzahl vorhanden ist,
+- die Drehzahl mindestens 400 U/min beträgt,
+- und der Motor bereits mindestens 5 Sekunden über 400 U/min läuft.
+
+Bei `rpm = null`, `--- U/min`, `0 U/min` oder weniger als 400 U/min wird kein
+Öldruckalarm angezeigt und kein entsprechender Eintrag in der Alarmhistorie erzeugt.
+
+Damit bleibt die Anzeige bei ausgeschaltetem Motor neutral, obwohl der gemessene
+Öldruck korrekt 0,0 bar beträgt.
