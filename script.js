@@ -1,11 +1,88 @@
-/* MF35X Tracker V9.4.5 – Öldruckalarm nur bei laufendem Motor */
+/* MF35X Tracker V9.4.6 – nur frische Firebase-Livedaten anzeigen */
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";import{getDatabase,ref,onValue,set,get,runTransaction}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";import{firebaseConfig}from"./firebase-config.js";
-const app=initializeApp(firebaseConfig),db=getDatabase(app),DEF={batteryWarn:12.2,batteryAlarm:11.8,oilPressureWarn:2,oilPressureAlarm:1.2,oilTempWarn:110,oilTempAlarm:125,cylTempWarn:180,cylTempAlarm:220};let limits=DEF,h={oilTemp:[],cylTemp:[]},active=new Set(),last=0,lastPos=null,first=true,currentLive=null,lastMaxResetAt=0,settingsReady=false,oilPressureEngineStartAt=0;const HMAX=60,AMAX=30,OIL_PRESSURE_RPM_MIN=400,OIL_PRESSURE_START_DELAY_MS=5000;
+const app=initializeApp(firebaseConfig),db=getDatabase(app),DEF={batteryWarn:12.2,batteryAlarm:11.8,oilPressureWarn:2,oilPressureAlarm:1.2,oilTempWarn:110,oilTempAlarm:125,cylTempWarn:180,cylTempAlarm:220};let limits=DEF,h={oilTemp:[],cylTemp:[]},active=new Set(),last=0,lastPos=null,first=true,currentLive=null,lastMaxResetAt=0,settingsReady=false,oilPressureEngineStartAt=0,liveTimeoutMs=3000;const HMAX=60,AMAX=30,OIL_PRESSURE_RPM_MIN=400,OIL_PRESSURE_START_DELAY_MS=5000;
 let map=L.map("map").setView([48.2,16.3],15);L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap"}).addTo(map);let marker=L.marker([48.2,16.3],{icon:L.icon({iconUrl:"tractor.png",iconSize:[76,76],iconAnchor:[38,38],className:"leaflet-custom-tractor"})}).addTo(map);
-setupNotifications();onValue(ref(db,"tracker/settings"),s=>{limits={...DEF,...(s.val()||{})};settingsReady=true;evaluateAlarms()});onValue(ref(db,"tracker/maxValues"),s=>renderMax(s.val()||{}));onValue(ref(db,"tracker/alarmHistory"),s=>renderHist(s.val()||[]));onValue(ref(db,"tracker/commands/resetMaxValues"),s=>{let cmd=s.val();if(cmd&&cmd.resetAt&&cmd.resetAt!==lastMaxResetAt){lastMaxResetAt=cmd.resetAt;resetMaxFromCurrentLive(cmd.resetAt);}});
-onValue(ref(db,"tracker/live"),s=>{let d=s.val();currentLive=d;if(!d||d.lat===undefined||d.lng===undefined){offline("Keine Daten");return}let lat=Number(d.lat),lng=Number(d.lng);if(isNaN(lat)||isNaN(lng)){offline("GPS ungültig");return}last=Date.now();lastPos={lat,lng};status("Online",1);conn(d);let speed=num(d.speed_kmh),bat=num(d.battery_v),rpm=num(d.rpm),op=num(d.oil_pressure),ot=num(d.oil_temp),ct=num(d.cylinder_temp),hd=num(d.hdop);txt("speed",speed!=null?speed.toFixed(1):"---");txt("sat",d.satellites??"---");txt("lastUpdateSmall",new Date().toLocaleTimeString("de-AT"));txt("battery",bat!=null?bat.toFixed(1):"---");txt("rpm",rpm!=null?Math.round(rpm):"---");txt("oilpressure",op!=null?op.toFixed(1):"---");txt("oiltemp",ot!=null?Math.round(ot):"---");txt("cyltemp",ct!=null?Math.round(ct):"---");gpsq(hd);maxv({speed,rpm,oilTemp:ot,cylTemp:ct,oilPressure:op,battery:bat});evaluateAlarms();add("oilTemp",ot);add("cylTemp",ct);chart("oilTempChart",h.oilTemp,"°C");chart("cylTempChart",h.cylTemp,"°C");marker.setLatLng([lat,lng]);first?(map.setView([lat,lng],17),first=false):map.panTo([lat,lng]);let mb=document.getElementById("mapsButton");mb.href=`https://www.google.com/maps?q=${lat},${lng}`;mb.classList.remove("disabled")});
-setInterval(()=>{if(!last)offline("Keine Daten");else if((Date.now()-last)/1000>10)offline("Offline");else status("Online",1)},1000);
-function txt(i,v){document.getElementById(i).innerText=v}function num(v){if(v===undefined||v===null||v==="")return null;v=Number(v);return isNaN(v)?null:v}function status(t,on){let s=document.getElementById("status"),i=document.getElementById("statusIcon");s.innerText=t;s.className="value "+(on?"online":"offline");i.classList.remove("online","offline");i.classList.add(on?"online":"offline")}function conn(d){let r=num(d.wifi_rssi);txt("wifiRssi",r!=null?Math.round(r):"---");txt("connection",r==null?"Online":r>-60?"Sehr gut":r>-75?"Gut":"Schwach")}function gpsq(hd){let i=document.getElementById("gpsQualityIcon");i.classList.remove("green","yellow","red","purple");if(hd==null){txt("gpsQuality","---");txt("hdop","---");i.classList.add("purple");return}txt("hdop",hd.toFixed(1));txt("gpsQuality",hd<=1.5?"Sehr gut":hd<=3?"Mittel":"Schlecht");i.classList.add(hd<=1.5?"green":hd<=3?"yellow":"red")}function offline(t){status(t,0);["speed","sat","battery","rpm","oilpressure","oiltemp","cyltemp","gpsQuality","hdop"].forEach(i=>txt(i,"---"));["battery","oilpressure","oiltemp","cyltemp"].forEach(clear);banner([]);if(!last)txt("lastUpdateSmall","---");let mb=document.getElementById("mapsButton");if(lastPos){mb.href=`https://www.google.com/maps?q=${lastPos.lat},${lastPos.lng}`;mb.classList.remove("disabled")}else{mb.href="#";mb.classList.add("disabled")}}function evaluateAlarms(){
+setupNotifications();onValue(ref(db,"tracker/device"),s=>{let d=s.val()||{},u=num(d.uploadIntervalMs);if(u!=null)liveTimeoutMs=Math.max(1500,Math.min(15000,u*4));});onValue(ref(db,"tracker/settings"),s=>{limits={...DEF,...(s.val()||{})};settingsReady=true;evaluateAlarms()});onValue(ref(db,"tracker/maxValues"),s=>renderMax(s.val()||{}));onValue(ref(db,"tracker/alarmHistory"),s=>renderHist(s.val()||[]));onValue(ref(db,"tracker/commands/resetMaxValues"),s=>{let cmd=s.val();if(cmd&&cmd.resetAt&&cmd.resetAt!==lastMaxResetAt){lastMaxResetAt=cmd.resetAt;resetMaxFromCurrentLive(cmd.resetAt);}});
+onValue(ref(db,"tracker/live"),s=>{
+  let d=s.val();
+
+  if(!d){
+    currentLive=null;
+    last=0;
+    offline("Keine Daten");
+    return;
+  }
+
+  let ts=num(d.timestamp);
+
+  if(ts==null){
+    currentLive=null;
+    last=0;
+    offline("Zeitstempel fehlt");
+    return;
+  }
+
+  last=ts;
+
+  if(Date.now()-ts>liveTimeoutMs){
+    currentLive=null;
+    offline("Offline");
+    return;
+  }
+
+  currentLive=d;
+
+  if(d.lat===undefined||d.lng===undefined){
+    offline("Keine GPS-Daten");
+    return;
+  }
+
+  let lat=Number(d.lat),lng=Number(d.lng);
+
+  if(isNaN(lat)||isNaN(lng)){
+    offline("GPS ungültig");
+    return;
+  }
+
+  lastPos={lat,lng};
+  status("Online",1);
+  conn(d);
+
+  let speed=num(d.speed_kmh),
+      bat=num(d.battery_v),
+      rpm=num(d.rpm),
+      op=num(d.oil_pressure),
+      ot=num(d.oil_temp),
+      ct=num(d.cylinder_temp),
+      hd=num(d.hdop);
+
+  txt("speed",speed!=null?speed.toFixed(1):"---");
+  txt("sat",d.satellites??"---");
+  txt("lastUpdateSmall",new Date(ts).toLocaleTimeString("de-AT"));
+  txt("battery",bat!=null?bat.toFixed(1):"---");
+  txt("rpm",rpm!=null?Math.round(rpm):"---");
+  txt("oilpressure",op!=null?op.toFixed(1):"---");
+  txt("oiltemp",ot!=null?Math.round(ot):"---");
+  txt("cyltemp",ct!=null?Math.round(ct):"---");
+
+  gpsq(hd);
+  maxv({speed,rpm,oilTemp:ot,cylTemp:ct,oilPressure:op,battery:bat});
+  evaluateAlarms();
+
+  add("oilTemp",ot);
+  add("cylTemp",ct);
+  chart("oilTempChart",h.oilTemp,"°C");
+  chart("cylTempChart",h.cylTemp,"°C");
+
+  marker.setLatLng([lat,lng]);
+  first?(map.setView([lat,lng],17),first=false):map.panTo([lat,lng]);
+
+  let mb=document.getElementById("mapsButton");
+  mb.href=`https://www.google.com/maps?q=${lat},${lng}`;
+  mb.classList.remove("disabled");
+})
+setInterval(()=>{if(!last){offline("Keine Daten");return}if(Date.now()-last>liveTimeoutMs){currentLive=null;offline("Offline");return}status("Online",1)},250);
+function txt(i,v){document.getElementById(i).innerText=v}function num(v){if(v===undefined||v===null||v==="")return null;v=Number(v);return isNaN(v)?null:v}function status(t,on){let s=document.getElementById("status"),i=document.getElementById("statusIcon");s.innerText=t;s.className="value "+(on?"online":"offline");i.classList.remove("online","offline");i.classList.add(on?"online":"offline")}function conn(d){let r=num(d.wifi_rssi);txt("wifiRssi",r!=null?Math.round(r):"---");txt("connection",r==null?"Online":r>-60?"Sehr gut":r>-75?"Gut":"Schwach")}function gpsq(hd){let i=document.getElementById("gpsQualityIcon");i.classList.remove("green","yellow","red","purple");if(hd==null){txt("gpsQuality","---");txt("hdop","---");i.classList.add("purple");return}txt("hdop",hd.toFixed(1));txt("gpsQuality",hd<=1.5?"Sehr gut":hd<=3?"Mittel":"Schlecht");i.classList.add(hd<=1.5?"green":hd<=3?"yellow":"red")}function offline(t){status(t,0);["speed","sat","battery","rpm","oilpressure","oiltemp","cyltemp","gpsQuality","hdop","connection","wifiRssi"].forEach(i=>txt(i,"---"));["battery","oilpressure","oiltemp","cyltemp"].forEach(clear);banner([]);if(!last)txt("lastUpdateSmall","---");let mb=document.getElementById("mapsButton");if(lastPos){mb.href=`https://www.google.com/maps?q=${lastPos.lat},${lastPos.lng}`;mb.classList.remove("disabled")}else{mb.href="#";mb.classList.add("disabled")}}function evaluateAlarms(){
   if(!settingsReady||!currentLive||!last){
     ["battery","oilpressure","oiltemp","cyltemp"].forEach(clear);
     banner([]);
