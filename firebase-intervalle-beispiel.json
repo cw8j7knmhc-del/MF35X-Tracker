@@ -1,0 +1,12 @@
+{
+  "tracker": {
+    "config": {
+      "intervals": {
+        "rpm_output_update_ms": 10,
+        "rpm_firebase_update_ms": 250,
+        "temperature_update_ms": 1000,
+        "gps_update_ms": 1000
+      }
+    }
+  }
+}

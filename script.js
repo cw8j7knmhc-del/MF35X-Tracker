@@ -1,4 +1,4 @@
-/* MF35X Tracker V9.3.5 Reset-Fix */
+/* MF35X Tracker V9.4.0 – konfigurierbare Intervalle im Adminbereich */
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";import{getDatabase,ref,onValue,set,get,runTransaction}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";import{firebaseConfig}from"./firebase-config.js";
 const app=initializeApp(firebaseConfig),db=getDatabase(app),DEF={batteryWarn:12.2,batteryAlarm:11.8,oilPressureWarn:2,oilPressureAlarm:1.2,oilTempWarn:110,oilTempAlarm:125,cylTempWarn:180,cylTempAlarm:220};let limits=DEF,h={oilTemp:[],cylTemp:[]},active=new Set(),last=0,lastPos=null,first=true,currentLive=null,lastMaxResetAt=0;const HMAX=60,AMAX=30;
 let map=L.map("map").setView([48.2,16.3],15);L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"&copy; OpenStreetMap"}).addTo(map);let marker=L.marker([48.2,16.3],{icon:L.icon({iconUrl:"tractor.png",iconSize:[76,76],iconAnchor:[38,38],className:"leaflet-custom-tractor"})}).addTo(map);
