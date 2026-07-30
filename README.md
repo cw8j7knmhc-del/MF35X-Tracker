@@ -1,4 +1,4 @@
-# MF35X Tracker V9.4.1
+# MF35X Tracker V9.4.2
 
 ## Einstellbare Intervalle
 
@@ -36,3 +36,16 @@ GPS-Position und GPS-Geschwindigkeit werden gemeinsam aktualisiert.
 - style.css
 
 Der ESP32-Sketch muss danach einmalig an die neue Firebase-Konfiguration angepasst werden.
+
+
+## Alarmstart-Fix V9.4.2
+
+Beim Öffnen der Besucheransicht werden Alarme erst geprüft, wenn sowohl
+
+- die gespeicherten Alarmgrenzen aus `tracker/settings`
+- als auch gültige Live-Daten aus `tracker/live`
+
+geladen wurden.
+
+Dadurch erscheint beim Seitenstart kein kurzzeitiger falscher Öldruckalarm und es
+wird auch kein falscher Eintrag in der Alarmhistorie erzeugt.
