@@ -1,4 +1,4 @@
-# MF35X Tracker V9.5.0
+# MF35X Tracker V9.5.1
 
 ## Einstellbare Intervalle
 
@@ -38,7 +38,7 @@ GPS-Position und GPS-Geschwindigkeit werden gemeinsam aktualisiert.
 Der ESP32-Sketch muss danach einmalig an die neue Firebase-Konfiguration angepasst werden.
 
 
-## Alarmstart-Fix V9.5.0
+## Alarmstart-Fix V9.5.1
 
 Beim Öffnen der Besucheransicht werden Alarme erst geprüft, wenn sowohl
 
@@ -51,7 +51,7 @@ Dadurch erscheint beim Seitenstart kein kurzzeitiger falscher Öldruckalarm und 
 wird auch kein falscher Eintrag in der Alarmhistorie erzeugt.
 
 
-## Öldruckalarm-Fix V9.5.0
+## Öldruckalarm-Fix V9.5.1
 
 Der Öldruckalarm wird nur ausgewertet, wenn:
 
@@ -66,7 +66,7 @@ Damit bleibt die Anzeige bei ausgeschaltetem Motor neutral, obwohl der gemessene
 Öldruck korrekt 0,0 bar beträgt.
 
 
-## Layout V9.5.0
+## Layout V9.5.1
 
 Obere Reihe:
 1. Geschwindigkeit
@@ -85,7 +85,7 @@ Untere Reihe:
 Das Benachrichtigungs- und Adminfeld befindet sich als letztes Bedienfeld am Seitenende.
 
 
-## Frische Live-Daten V9.5.0
+## Frische Live-Daten V9.5.1
 
 Die Besucheransicht prüft jetzt den Firebase-Zeitstempel `tracker/live/timestamp`,
 bevor Werte angezeigt werden.
@@ -98,7 +98,7 @@ bevor Werte angezeigt werden.
 - Verbindung und RSSI werden bei Offline ebenfalls geleert.
 
 
-## Satellitenkarte V9.5.0
+## Satellitenkarte V9.5.1
 
 Die eingebettete Leaflet-Karte verwendet jetzt standardmäßig Esri World Imagery
 anstelle der bisherigen OpenStreetMap-Straßenkarte.
@@ -110,7 +110,7 @@ Unverändert bleiben:
 - Button „In Google Maps öffnen“
 
 
-## V9.5.0 – Rennauswertung vorbereitet
+## V9.5.1 – Rennauswertung vorbereitet
 
 Neue Dateien:
 - `analysis.html`
@@ -167,3 +167,17 @@ den Wert `true` meldet.
 Für effiziente Firebase-Zeitbereichsabfragen sollte später in den vorhandenen Realtime-Database-
 Regeln am History-Rennknoten ein Index für `timestamp` ergänzt werden (`.indexOn`).
 Die bestehenden Regeln nicht blind ersetzen; den Index nur in die vorhandene Regelstruktur integrieren.
+
+
+## V9.5.1 – Kartenposition
+
+Die Satellitenkarte befindet sich jetzt direkt unter den beiden Reihen der Live-Anzeigen.
+
+Reihenfolge:
+1. Live-Anzeigen
+2. Satellitenkarte
+3. Button „In Google Maps öffnen“
+4. Maximalwerte / Alarmhistorie
+5. Temperaturdiagramme
+6. Rennauswertung
+7. Benachrichtigungen / Admin am Seitenende

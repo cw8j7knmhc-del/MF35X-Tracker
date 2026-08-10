@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.5.0 */
+/* MF35X Tracker Admin V9.5.1 */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";

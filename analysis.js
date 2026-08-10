@@ -1,4 +1,4 @@
-/* MF35X Tracker Rennauswertung V9.5.0 */
+/* MF35X Tracker Rennauswertung V9.5.1 */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getDatabase, ref, get, query, orderByChild, startAt, endAt
