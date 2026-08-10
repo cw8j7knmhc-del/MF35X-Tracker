@@ -1,4 +1,4 @@
-# MF35X Tracker V9.4.6
+# MF35X Tracker V9.4.7
 
 ## Einstellbare Intervalle
 
@@ -38,7 +38,7 @@ GPS-Position und GPS-Geschwindigkeit werden gemeinsam aktualisiert.
 Der ESP32-Sketch muss danach einmalig an die neue Firebase-Konfiguration angepasst werden.
 
 
-## Alarmstart-Fix V9.4.6
+## Alarmstart-Fix V9.4.7
 
 Beim Öffnen der Besucheransicht werden Alarme erst geprüft, wenn sowohl
 
@@ -51,7 +51,7 @@ Dadurch erscheint beim Seitenstart kein kurzzeitiger falscher Öldruckalarm und 
 wird auch kein falscher Eintrag in der Alarmhistorie erzeugt.
 
 
-## Öldruckalarm-Fix V9.4.6
+## Öldruckalarm-Fix V9.4.7
 
 Der Öldruckalarm wird nur ausgewertet, wenn:
 
@@ -66,7 +66,7 @@ Damit bleibt die Anzeige bei ausgeschaltetem Motor neutral, obwohl der gemessene
 Öldruck korrekt 0,0 bar beträgt.
 
 
-## Layout V9.4.6
+## Layout V9.4.7
 
 Obere Reihe:
 1. Geschwindigkeit
@@ -85,7 +85,7 @@ Untere Reihe:
 Das Benachrichtigungs- und Adminfeld befindet sich als letztes Bedienfeld am Seitenende.
 
 
-## Frische Live-Daten V9.4.6
+## Frische Live-Daten V9.4.7
 
 Die Besucheransicht prüft jetzt den Firebase-Zeitstempel `tracker/live/timestamp`,
 bevor Werte angezeigt werden.
@@ -96,3 +96,15 @@ bevor Werte angezeigt werden.
 - Bei aktuell 500 ms Uploadintervall beträgt der Timeout 2 Sekunden.
 - Die Anzeige „Letztes Update“ verwendet den echten Firebase-Zeitstempel.
 - Verbindung und RSSI werden bei Offline ebenfalls geleert.
+
+
+## Satellitenkarte V9.4.7
+
+Die eingebettete Leaflet-Karte verwendet jetzt standardmäßig Esri World Imagery
+anstelle der bisherigen OpenStreetMap-Straßenkarte.
+
+Unverändert bleiben:
+- Traktor-Marker
+- automatische Positionsnachführung
+- Zoom und Verschieben
+- Button „In Google Maps öffnen“
