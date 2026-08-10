@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.4.7 */
+/* MF35X Tracker Admin V9.5.0 */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -21,7 +21,8 @@ const DEFAULT_INTERVALS = {
   rpm_firebase_update_ms: 250,
   oil_pressure_update_ms: 100,
   temperature_update_ms: 1000,
-  gps_update_ms: 1000
+  gps_update_ms: 1000,
+  history_update_ms: 5000
 };
 
 const INTERVAL_RULES = {
@@ -29,7 +30,8 @@ const INTERVAL_RULES = {
   rpm_firebase_update_ms: { id: "setRpmFirebaseUpdateMs", min: 100, max: 5000 },
   oil_pressure_update_ms: { id: "setOilPressureUpdateMs", min: 50, max: 5000 },
   temperature_update_ms: { id: "setTemperatureUpdateMs", min: 250, max: 10000 },
-  gps_update_ms: { id: "setGpsUpdateMs", min: 1000, max: 30000 }
+  gps_update_ms: { id: "setGpsUpdateMs", min: 1000, max: 30000 },
+  history_update_ms: { id: "setHistoryUpdateMs", min: 1000, max: 60000 }
 };
 
 const app = initializeApp(firebaseConfig);
@@ -62,6 +64,8 @@ function initAdmin() {
   listenIntervals();
   listenMaxValues();
   listenAlarmHistory();
+  listenHistorySupport();
+  listenRecordingState();
 
   document.getElementById("saveSettings").addEventListener("click", saveSettings);
   document.getElementById("resetSettings").addEventListener("click", async () => {
@@ -74,6 +78,9 @@ function initAdmin() {
     await set(ref(db, "tracker/config/intervals"), DEFAULT_INTERVALS);
     setIntervalStatus("Standardintervalle gespeichert.", "success");
   });
+
+  document.getElementById("startRecording").addEventListener("click", startRecording);
+  document.getElementById("stopRecording").addEventListener("click", stopRecording);
 
   document.getElementById("resetMaxValues").addEventListener("click", resetMaxValues);
   document.getElementById("clearAlarmHistory").addEventListener("click", async () => {
@@ -171,6 +178,136 @@ function setIntervalStatus(text, state = "") {
   element.textContent = text;
   element.className = "config-status";
   if (state) element.classList.add(`config-status-${state}`);
+}
+
+
+let historySupported = false;
+let recordingState = { enabled: false };
+
+function listenHistorySupport() {
+  onValue(ref(db, "tracker/device/historySupported"), snapshot => {
+    historySupported = snapshot.val() === true;
+
+    const badge = document.getElementById("historySupportStatus");
+    badge.textContent = historySupported ? "bereit" : "noch nicht unterstützt";
+    badge.className = "recording-badge " +
+      (historySupported ? "recording-badge-on" : "recording-badge-wait");
+
+    updateRecordingButtons();
+  });
+}
+
+function listenRecordingState() {
+  onValue(ref(db, "tracker/config/recording"), snapshot => {
+    recordingState = snapshot.val() || { enabled: false };
+
+    const active = recordingState.enabled === true;
+    const badge = document.getElementById("recordingStatus");
+    badge.textContent = active ? "läuft" : "aus";
+    badge.className = "recording-badge " +
+      (active ? "recording-badge-on" : "recording-badge-off");
+
+    document.getElementById("currentRaceId").value = recordingState.raceId || "";
+    if (recordingState.raceName && !document.getElementById("raceName").value) {
+      document.getElementById("raceName").value = recordingState.raceName;
+    }
+
+    updateRecordingButtons();
+  });
+}
+
+function updateRecordingButtons() {
+  const active = recordingState.enabled === true;
+  document.getElementById("startRecording").disabled = !historySupported || active;
+  document.getElementById("stopRecording").disabled = !active;
+
+  const hint = document.getElementById("recordingHint");
+
+  if (!historySupported) {
+    hint.innerHTML =
+      'Die Website ist fertig vorbereitet. Die Aufzeichnung kann erst gestartet werden, ' +
+      'wenn die spätere ESP32-Firmware <code>tracker/device/historySupported = true</code> meldet.';
+  } else if (active) {
+    hint.textContent =
+      `Aufzeichnung "${recordingState.raceName || recordingState.raceId}" läuft.`;
+  } else {
+    hint.textContent =
+      "ESP32 unterstützt die Rennhistorie. Eine neue Aufzeichnung kann gestartet werden.";
+  }
+}
+
+async function startRecording() {
+  if (!historySupported) {
+    alert("Die aktuelle ESP32-Firmware unterstützt die Rennhistorie noch nicht.");
+    return;
+  }
+
+  const nameInput = document.getElementById("raceName");
+  const raceName = nameInput.value.trim();
+
+  if (!raceName) {
+    alert("Bitte zuerst einen Rennnamen eingeben.");
+    nameInput.focus();
+    return;
+  }
+
+  const historyInterval = readBoundedInteger("setHistoryUpdateMs", 1000, 60000);
+  const startedAt = Date.now();
+  const raceId = createRaceId(startedAt);
+
+  try {
+    await set(ref(db, `tracker/races/${raceId}`), {
+      name: raceName,
+      startedAt,
+      stoppedAt: null,
+      status: "recording",
+      history_update_ms: historyInterval
+    });
+
+    await set(ref(db, "tracker/config/recording"), {
+      enabled: true,
+      raceId,
+      raceName,
+      history_update_ms: historyInterval,
+      requestedAt: startedAt
+    });
+
+    alert(`Rennaufzeichnung "${raceName}" gestartet.`);
+  } catch (error) {
+    alert("Start fehlgeschlagen: " + error.message);
+  }
+}
+
+async function stopRecording() {
+  if (!recordingState || recordingState.enabled !== true || !recordingState.raceId) {
+    alert("Es läuft derzeit keine Rennaufzeichnung.");
+    return;
+  }
+
+  const stoppedAt = Date.now();
+  const raceId = recordingState.raceId;
+
+  try {
+    await set(ref(db, `tracker/races/${raceId}/stoppedAt`), stoppedAt);
+    await set(ref(db, `tracker/races/${raceId}/status`), "finished");
+
+    await set(ref(db, "tracker/config/recording"), {
+      ...recordingState,
+      enabled: false,
+      stoppedAt,
+      requestedAt: stoppedAt
+    });
+
+    alert("Rennaufzeichnung gestoppt.");
+  } catch (error) {
+    alert("Stop fehlgeschlagen: " + error.message);
+  }
+}
+
+function createRaceId(timestamp) {
+  const d = new Date(timestamp);
+  const p = n => String(n).padStart(2, "0");
+  return `race_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 async function resetMaxValues() {

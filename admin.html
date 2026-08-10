@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MF35X Admin V9.4.7</title>
+  <title>MF35X Admin V9.5.0</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=9.4.7">
+  <link rel="stylesheet" href="style.css?v=9.5.0">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.4.7</div>
+  <div class="version">Version 9.5.0</div>
 </header>
 
 <main>
@@ -75,6 +75,12 @@
         <input id="setGpsUpdateMs" type="number" min="1000" max="30000" step="100">
         <span class="field-hint">Position und Geschwindigkeit gemeinsam · Standard 1000 ms</span>
       </label>
+
+      <label>
+        Rennhistorie / Archiv (ms)
+        <input id="setHistoryUpdateMs" type="number" min="1000" max="60000" step="1000">
+        <span class="field-hint">Langzeitaufzeichnung · empfohlen 5000 ms</span>
+      </label>
     </div>
 
     <p class="settings-note settings-note-block">
@@ -87,6 +93,41 @@
       <button id="saveIntervals" class="save-button">Intervalle speichern</button>
       <button id="resetIntervals" class="reset-button">Standardintervalle laden</button>
       <span id="intervalStatus" class="config-status">Noch nicht geladen.</span>
+    </div>
+  </section>
+
+  <section class="settings admin-settings">
+    <h2>Rennaufzeichnung</h2>
+
+    <div class="recording-status-row">
+      <span>ESP32-Unterstützung:</span>
+      <strong id="historySupportStatus" class="recording-badge recording-badge-wait">noch nicht erkannt</strong>
+      <span>Aufzeichnung:</span>
+      <strong id="recordingStatus" class="recording-badge">aus</strong>
+    </div>
+
+    <div class="settings-grid recording-grid">
+      <label>
+        Rennname
+        <input id="raceName" type="text" maxlength="60" placeholder="z. B. Reingers 24h 2027">
+        <span class="field-hint">Wird später in der Rennauswertung angezeigt.</span>
+      </label>
+      <label>
+        Aktuelle Renn-ID
+        <input id="currentRaceId" type="text" readonly placeholder="---">
+        <span class="field-hint">Wird beim Start automatisch erzeugt.</span>
+      </label>
+    </div>
+
+    <p id="recordingHint" class="settings-note settings-note-block">
+      Die Website ist vorbereitet. Start/Stop wird automatisch freigeschaltet,
+      sobald die spätere ESP32-Firmware <code>historySupported = true</code> meldet.
+    </p>
+
+    <div class="settings-actions">
+      <button id="startRecording" class="save-button" disabled>Aufzeichnung starten</button>
+      <button id="stopRecording" class="reset-button" disabled>Aufzeichnung stoppen</button>
+      <a class="button inline-button" href="analysis.html">Rennauswertung öffnen</a>
     </div>
   </section>
 
@@ -115,6 +156,6 @@
 </section>
 </main>
 
-<script type="module" src="admin.js?v=9.4.7"></script>
+<script type="module" src="admin.js?v=9.5.0"></script>
 </body>
 </html>

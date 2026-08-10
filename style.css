@@ -15,3 +15,49 @@
 /* V9.4.5 – exakte Kartenreihenfolge und Bedienfeld am Seitenende */
 .footer{margin-bottom:18px}
 .notify-panel{margin-top:18px;margin-bottom:0}
+
+
+/* V9.5.0 – Rennauswertung */
+.analysis-link-button{background:#6d4cff}
+.analysis-nav{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.inline-button{display:inline-block;margin:0;font-size:15px}
+.analysis-panel{text-align:left}
+.analysis-control-grid{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:12px}
+.analysis-control-grid label,.recording-grid label{color:#ddd;font-size:14px}
+.analysis-control-grid input,.analysis-select,.recording-grid input{
+  width:100%;margin-top:7px;padding:11px;border-radius:9px;
+  border:1px solid #555;background:#111;color:white
+}
+.race-info{margin-top:14px;padding:12px;background:#151515;border-radius:10px;color:#bbb;line-height:1.5}
+.metric-toggle-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.metric-toggle-grid label{background:#151515;border-radius:10px;padding:12px;cursor:pointer}
+.metric-toggle-grid input{margin-right:8px;accent-color:#207dff}
+.history-chart-wrap{position:relative;height:420px;width:100%}
+.history-chart-wrap canvas{width:100%!important;height:100%!important}
+.analysis-details{background:#1d1d1d;border:1px solid #333;border-radius:14px;margin-bottom:18px;text-align:left}
+.analysis-details>summary{cursor:pointer;font-weight:bold;padding:16px}
+.analysis-inner-panel{border:0;margin:0;border-top:1px solid #333;border-radius:0 0 14px 14px}
+.stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.stat-card{background:#151515;border:1px solid #333;border-radius:12px;padding:14px}
+.stat-title{font-weight:bold;font-size:17px;margin-bottom:10px;color:#fff}
+.stat-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid #292929;color:#aaa}
+.stat-row strong{color:#fff;text-align:right}
+.stat-empty{color:#777;padding:12px 0}
+.recording-status-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.recording-badge{display:inline-block;border-radius:999px;padding:5px 10px;background:#555;font-size:13px}
+.recording-badge-on{background:#176d28;color:#8cff9b}
+.recording-badge-off{background:#444;color:#bbb}
+.recording-badge-wait{background:#735700;color:#ffd85a}
+button:disabled{opacity:.45;cursor:not-allowed}
+code{background:#151515;padding:2px 5px;border-radius:5px;color:#ddd}
+
+@media(max-width:800px){
+  .analysis-control-grid{grid-template-columns:1fr}
+  .metric-toggle-grid{grid-template-columns:repeat(2,1fr)}
+  .stats-grid{grid-template-columns:1fr}
+  .history-chart-wrap{height:360px}
+}
+@media(max-width:520px){
+  .metric-toggle-grid{grid-template-columns:1fr}
+  .history-chart-wrap{height:320px}
+}
