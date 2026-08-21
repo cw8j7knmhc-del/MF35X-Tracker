@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MF35X Admin V9.5.1</title>
+  <title>MF35X Admin V9.5.2</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=9.5.1">
+  <link rel="stylesheet" href="style.css?v=9.5.2">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.5.1</div>
+  <div class="version">Version 9.5.2</div>
 </header>
 
 <main>
@@ -44,14 +44,37 @@
   </section>
 
   <section class="settings admin-settings">
-    <h2>Aktualisierungsintervalle</h2>
+    <h2>Externer HIGH/LOW-Ausgang</h2>
     <div class="settings-grid">
       <label>
-        5-V-Drehzahl-Rechteckausgang (ms)
-        <input id="setRpmOutputUpdateMs" type="number" min="5" max="200" step="1">
-        <span class="field-hint">Frequenzanpassung des kontinuierlichen Rechtecksignals · Standard 10 ms</span>
+        Mindestgeschwindigkeit (km/h)
+        <input id="setExternalOutputSpeedKmh" type="number" min="0" max="200" step="1">
+        <span class="field-hint">Vorbedingung für den Ausgang · Standard 60 km/h</span>
       </label>
 
+      <label>
+        Schalt-Drehzahl (U/min)
+        <input id="setExternalOutputRpm" type="number" min="0" max="10000" step="50">
+        <span class="field-hint">Ab dieser Drehzahl wird HIGH geschaltet · Standard 3200 U/min</span>
+      </label>
+    </div>
+
+    <p class="settings-note settings-note-block">
+      Schaltlogik: Nur wenn die Geschwindigkeit mindestens den eingestellten Wert erreicht,
+      entscheidet die Drehzahl. Drehzahl ab Schaltwert = HIGH, Drehzahl darunter = LOW.
+      Unterhalb der Mindestgeschwindigkeit bleibt der Ausgang immer LOW.
+    </p>
+
+    <div class="settings-actions">
+      <button id="saveExternalOutput" class="save-button">Ausgangswerte speichern</button>
+      <button id="resetExternalOutput" class="reset-button">Standardwerte laden</button>
+      <span id="externalOutputStatus" class="config-status">Noch nicht geladen.</span>
+    </div>
+  </section>
+
+  <section class="settings admin-settings">
+    <h2>Aktualisierungsintervalle</h2>
+    <div class="settings-grid">
       <label>
         Drehzahl zu Firebase/Website (ms)
         <input id="setRpmFirebaseUpdateMs" type="number" min="100" max="5000" step="50">
@@ -84,8 +107,6 @@
     </div>
 
     <p class="settings-note settings-note-block">
-      Der 5-V-Rechteckausgang läuft dauerhaft. Sein Intervall bestimmt nur, wie oft die
-      Ausgangsfrequenz an die neu berechnete Drehzahl angepasst wird.
       GPS-Position und GPS-Geschwindigkeit stammen aus demselben GPS-Datensatz.
     </p>
 
@@ -156,6 +177,6 @@
 </section>
 </main>
 
-<script type="module" src="admin.js?v=9.5.1"></script>
+<script type="module" src="admin.js?v=9.5.2"></script>
 </body>
 </html>
