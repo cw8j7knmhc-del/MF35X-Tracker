@@ -1,4 +1,5 @@
-/* MF35X Tracker Admin V9.5.1 */
+/* MF35X Tracker Admin V9.5.2 */
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -16,8 +17,13 @@ const DEFAULT_LIMITS = {
   cylTempAlarm: 220
 };
 
+const DEFAULT_OUTPUT_CONFIG = {
+  speed_enable_kmh: 60,
+  rpm_on: 3200,
+  rpm_off: 3150
+};
+
 const DEFAULT_INTERVALS = {
-  rpm_output_update_ms: 10,
   rpm_firebase_update_ms: 250,
   oil_pressure_update_ms: 100,
   temperature_update_ms: 1000,
@@ -26,21 +32,46 @@ const DEFAULT_INTERVALS = {
 };
 
 const INTERVAL_RULES = {
-  rpm_output_update_ms: { id: "setRpmOutputUpdateMs", min: 5, max: 200 },
-  rpm_firebase_update_ms: { id: "setRpmFirebaseUpdateMs", min: 100, max: 5000 },
-  oil_pressure_update_ms: { id: "setOilPressureUpdateMs", min: 50, max: 5000 },
-  temperature_update_ms: { id: "setTemperatureUpdateMs", min: 250, max: 10000 },
-  gps_update_ms: { id: "setGpsUpdateMs", min: 1000, max: 30000 },
-  history_update_ms: { id: "setHistoryUpdateMs", min: 1000, max: 60000 }
+  rpm_firebase_update_ms: {
+    id: "setRpmFirebaseUpdateMs",
+    min: 100,
+    max: 5000
+  },
+  oil_pressure_update_ms: {
+    id: "setOilPressureUpdateMs",
+    min: 50,
+    max: 5000
+  },
+  temperature_update_ms: {
+    id: "setTemperatureUpdateMs",
+    min: 250,
+    max: 10000
+  },
+  gps_update_ms: {
+    id: "setGpsUpdateMs",
+    min: 1000,
+    max: 30000
+  },
+  history_update_ms: {
+    id: "setHistoryUpdateMs",
+    min: 1000,
+    max: 60000
+  }
 };
 
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
+
 let adminStarted = false;
+let historySupported = false;
+let recordingState = { enabled: false };
 
 document.getElementById("loginButton").addEventListener("click", login);
+
 document.getElementById("adminPassword").addEventListener("keydown", event => {
-  if (event.key === "Enter") login();
+  if (event.key === "Enter") {
+    login();
+  }
 });
 
 function login() {
@@ -61,6 +92,7 @@ function login() {
 
 function initAdmin() {
   listenSettings();
+  listenOutputConfig();
   listenIntervals();
   listenMaxValues();
   listenAlarmHistory();
@@ -68,21 +100,39 @@ function initAdmin() {
   listenRecordingState();
 
   document.getElementById("saveSettings").addEventListener("click", saveSettings);
+
   document.getElementById("resetSettings").addEventListener("click", async () => {
     await set(ref(db, "tracker/settings"), DEFAULT_LIMITS);
     alert("Standardwerte geladen.");
   });
 
+  document.getElementById("saveOutputConfig").addEventListener("click", saveOutputConfig);
+
+  document.getElementById("resetOutputConfig").addEventListener("click", async () => {
+    try {
+      await set(ref(db, "tracker/config/external_output"), DEFAULT_OUTPUT_CONFIG);
+      setOutputConfigStatus("Standardwerte gespeichert.", "success");
+    } catch (error) {
+      setOutputConfigStatus("Speichern fehlgeschlagen: " + error.message, "error");
+    }
+  });
+
   document.getElementById("saveIntervals").addEventListener("click", saveIntervals);
+
   document.getElementById("resetIntervals").addEventListener("click", async () => {
-    await set(ref(db, "tracker/config/intervals"), DEFAULT_INTERVALS);
-    setIntervalStatus("Standardintervalle gespeichert.", "success");
+    try {
+      await set(ref(db, "tracker/config/intervals"), DEFAULT_INTERVALS);
+      setIntervalStatus("Standardintervalle gespeichert.", "success");
+    } catch (error) {
+      setIntervalStatus("Speichern fehlgeschlagen: " + error.message, "error");
+    }
   });
 
   document.getElementById("startRecording").addEventListener("click", startRecording);
   document.getElementById("stopRecording").addEventListener("click", stopRecording);
 
   document.getElementById("resetMaxValues").addEventListener("click", resetMaxValues);
+
   document.getElementById("clearAlarmHistory").addEventListener("click", async () => {
     await set(ref(db, "tracker/alarmHistory"), []);
     alert("Alarmhistorie geleert.");
@@ -91,7 +141,11 @@ function initAdmin() {
 
 function listenSettings() {
   onValue(ref(db, "tracker/settings"), snapshot => {
-    const settings = { ...DEFAULT_LIMITS, ...(snapshot.val() || {}) };
+    const settings = {
+      ...DEFAULT_LIMITS,
+      ...(snapshot.val() || {})
+    };
+
     setInput("setBatteryWarn", settings.batteryWarn);
     setInput("setBatteryAlarm", settings.batteryAlarm);
     setInput("setOilPressureWarn", settings.oilPressureWarn);
@@ -119,26 +173,136 @@ async function saveSettings() {
   alert("Alarmgrenzen gespeichert.");
 }
 
+function listenOutputConfig() {
+  const outputRef = ref(db, "tracker/config/external_output");
+
+  onValue(
+    outputRef,
+    async snapshot => {
+      const stored = snapshot.val();
+
+      if (!stored) {
+        await set(outputRef, DEFAULT_OUTPUT_CONFIG);
+        return;
+      }
+
+      const values = {
+        ...DEFAULT_OUTPUT_CONFIG,
+        ...stored
+      };
+
+      setInput("setOutputSpeedEnableKmh", values.speed_enable_kmh);
+      setInput("setOutputRpmOn", values.rpm_on);
+      setInput("setOutputRpmOff", values.rpm_off);
+
+      setOutputConfigStatus(
+        "Schaltausgang aus Firebase geladen.",
+        "success"
+      );
+    },
+    error => {
+      setOutputConfigStatus(
+        "Firebase-Lesefehler: " + error.message,
+        "error"
+      );
+    }
+  );
+}
+
+async function saveOutputConfig() {
+  try {
+    const speedEnableKmh = readBoundedInteger(
+      "setOutputSpeedEnableKmh",
+      0,
+      200
+    );
+
+    const rpmOn = readBoundedInteger(
+      "setOutputRpmOn",
+      0,
+      10000
+    );
+
+    const rpmOff = readBoundedInteger(
+      "setOutputRpmOff",
+      0,
+      10000
+    );
+
+    if (rpmOff >= rpmOn) {
+      throw new Error(
+        "Der LOW-Ausschaltwert muss kleiner als der HIGH-Einschaltwert sein."
+      );
+    }
+
+    const outputConfig = {
+      speed_enable_kmh: speedEnableKmh,
+      rpm_on: rpmOn,
+      rpm_off: rpmOff
+    };
+
+    setOutputConfigStatus("Wird gespeichert…", "pending");
+
+    await set(
+      ref(db, "tracker/config/external_output"),
+      outputConfig
+    );
+
+    setOutputConfigStatus(
+      "Schaltausgang gespeichert.",
+      "success"
+    );
+  } catch (error) {
+    setOutputConfigStatus(error.message, "error");
+    alert(error.message);
+  }
+}
+
+function setOutputConfigStatus(text, state = "") {
+  const element = document.getElementById("outputConfigStatus");
+
+  element.textContent = text;
+  element.className = "config-status";
+
+  if (state) {
+    element.classList.add(`config-status-${state}`);
+  }
+}
+
 function listenIntervals() {
   const intervalsRef = ref(db, "tracker/config/intervals");
 
-  onValue(intervalsRef, async snapshot => {
-    const stored = snapshot.val();
+  onValue(
+    intervalsRef,
+    async snapshot => {
+      const stored = snapshot.val();
 
-    if (!stored) {
-      await set(intervalsRef, DEFAULT_INTERVALS);
-      return;
+      if (!stored) {
+        await set(intervalsRef, DEFAULT_INTERVALS);
+        return;
+      }
+
+      const values = {
+        ...DEFAULT_INTERVALS,
+        ...stored
+      };
+
+      for (const [key, rule] of Object.entries(INTERVAL_RULES)) {
+        setInput(rule.id, values[key]);
+      }
+
+      setIntervalStatus(
+        "Intervalle aus Firebase geladen.",
+        "success"
+      );
+    },
+    error => {
+      setIntervalStatus(
+        "Firebase-Lesefehler: " + error.message,
+        "error"
+      );
     }
-
-    const values = { ...DEFAULT_INTERVALS, ...stored };
-    for (const [key, rule] of Object.entries(INTERVAL_RULES)) {
-      setInput(rule.id, values[key]);
-    }
-
-    setIntervalStatus("Intervalle aus Firebase geladen.", "success");
-  }, error => {
-    setIntervalStatus("Firebase-Lesefehler: " + error.message, "error");
-  });
+  );
 }
 
 async function saveIntervals() {
@@ -146,12 +310,24 @@ async function saveIntervals() {
     const intervals = {};
 
     for (const [key, rule] of Object.entries(INTERVAL_RULES)) {
-      intervals[key] = readBoundedInteger(rule.id, rule.min, rule.max);
+      intervals[key] = readBoundedInteger(
+        rule.id,
+        rule.min,
+        rule.max
+      );
     }
 
     setIntervalStatus("Wird gespeichert…", "pending");
-    await set(ref(db, "tracker/config/intervals"), intervals);
-    setIntervalStatus("Intervalle gespeichert.", "success");
+
+    await set(
+      ref(db, "tracker/config/intervals"),
+      intervals
+    );
+
+    setIntervalStatus(
+      "Intervalle gespeichert.",
+      "success"
+    );
   } catch (error) {
     setIntervalStatus(error.message, "error");
     alert(error.message);
@@ -163,11 +339,13 @@ function readBoundedInteger(id, min, max) {
   const value = Number(input.value);
 
   if (!Number.isInteger(value)) {
-    throw new Error("Bitte nur ganze Millisekundenwerte eingeben.");
+    throw new Error("Bitte nur ganze Zahlen eingeben.");
   }
 
   if (value < min || value > max) {
-    throw new Error(`Der Wert muss zwischen ${min} und ${max} ms liegen.`);
+    throw new Error(
+      `Der Wert muss zwischen ${min} und ${max} liegen.`
+    );
   }
 
   return value;
@@ -175,23 +353,32 @@ function readBoundedInteger(id, min, max) {
 
 function setIntervalStatus(text, state = "") {
   const element = document.getElementById("intervalStatus");
+
   element.textContent = text;
   element.className = "config-status";
-  if (state) element.classList.add(`config-status-${state}`);
+
+  if (state) {
+    element.classList.add(`config-status-${state}`);
+  }
 }
-
-
-let historySupported = false;
-let recordingState = { enabled: false };
 
 function listenHistorySupport() {
   onValue(ref(db, "tracker/device/historySupported"), snapshot => {
     historySupported = snapshot.val() === true;
 
     const badge = document.getElementById("historySupportStatus");
-    badge.textContent = historySupported ? "bereit" : "noch nicht unterstützt";
-    badge.className = "recording-badge " +
-      (historySupported ? "recording-badge-on" : "recording-badge-wait");
+
+    badge.textContent = historySupported
+      ? "bereit"
+      : "noch nicht unterstützt";
+
+    badge.className =
+      "recording-badge " +
+      (
+        historySupported
+          ? "recording-badge-on"
+          : "recording-badge-wait"
+      );
 
     updateRecordingButtons();
   });
@@ -199,17 +386,32 @@ function listenHistorySupport() {
 
 function listenRecordingState() {
   onValue(ref(db, "tracker/config/recording"), snapshot => {
-    recordingState = snapshot.val() || { enabled: false };
+    recordingState = snapshot.val() || {
+      enabled: false
+    };
 
     const active = recordingState.enabled === true;
     const badge = document.getElementById("recordingStatus");
-    badge.textContent = active ? "läuft" : "aus";
-    badge.className = "recording-badge " +
-      (active ? "recording-badge-on" : "recording-badge-off");
 
-    document.getElementById("currentRaceId").value = recordingState.raceId || "";
-    if (recordingState.raceName && !document.getElementById("raceName").value) {
-      document.getElementById("raceName").value = recordingState.raceName;
+    badge.textContent = active ? "läuft" : "aus";
+
+    badge.className =
+      "recording-badge " +
+      (
+        active
+          ? "recording-badge-on"
+          : "recording-badge-off"
+      );
+
+    document.getElementById("currentRaceId").value =
+      recordingState.raceId || "";
+
+    if (
+      recordingState.raceName &&
+      !document.getElementById("raceName").value
+    ) {
+      document.getElementById("raceName").value =
+        recordingState.raceName;
     }
 
     updateRecordingButtons();
@@ -218,8 +420,12 @@ function listenRecordingState() {
 
 function updateRecordingButtons() {
   const active = recordingState.enabled === true;
-  document.getElementById("startRecording").disabled = !historySupported || active;
-  document.getElementById("stopRecording").disabled = !active;
+
+  document.getElementById("startRecording").disabled =
+    !historySupported || active;
+
+  document.getElementById("stopRecording").disabled =
+    !active;
 
   const hint = document.getElementById("recordingHint");
 
@@ -238,7 +444,9 @@ function updateRecordingButtons() {
 
 async function startRecording() {
   if (!historySupported) {
-    alert("Die aktuelle ESP32-Firmware unterstützt die Rennhistorie noch nicht.");
+    alert(
+      "Die aktuelle ESP32-Firmware unterstützt die Rennhistorie noch nicht."
+    );
     return;
   }
 
@@ -251,36 +459,57 @@ async function startRecording() {
     return;
   }
 
-  const historyInterval = readBoundedInteger("setHistoryUpdateMs", 1000, 60000);
+  const historyInterval = readBoundedInteger(
+    "setHistoryUpdateMs",
+    1000,
+    60000
+  );
+
   const startedAt = Date.now();
   const raceId = createRaceId(startedAt);
 
   try {
-    await set(ref(db, `tracker/races/${raceId}`), {
-      name: raceName,
-      startedAt,
-      stoppedAt: null,
-      status: "recording",
-      history_update_ms: historyInterval
-    });
+    await set(
+      ref(db, `tracker/races/${raceId}`),
+      {
+        name: raceName,
+        startedAt,
+        stoppedAt: null,
+        status: "recording",
+        history_update_ms: historyInterval
+      }
+    );
 
-    await set(ref(db, "tracker/config/recording"), {
-      enabled: true,
-      raceId,
-      raceName,
-      history_update_ms: historyInterval,
-      requestedAt: startedAt
-    });
+    await set(
+      ref(db, "tracker/config/recording"),
+      {
+        enabled: true,
+        raceId,
+        raceName,
+        history_update_ms: historyInterval,
+        requestedAt: startedAt
+      }
+    );
 
-    alert(`Rennaufzeichnung "${raceName}" gestartet.`);
+    alert(
+      `Rennaufzeichnung "${raceName}" gestartet.`
+    );
   } catch (error) {
-    alert("Start fehlgeschlagen: " + error.message);
+    alert(
+      "Start fehlgeschlagen: " + error.message
+    );
   }
 }
 
 async function stopRecording() {
-  if (!recordingState || recordingState.enabled !== true || !recordingState.raceId) {
-    alert("Es läuft derzeit keine Rennaufzeichnung.");
+  if (
+    !recordingState ||
+    recordingState.enabled !== true ||
+    !recordingState.raceId
+  ) {
+    alert(
+      "Es läuft derzeit keine Rennaufzeichnung."
+    );
     return;
   }
 
@@ -288,51 +517,86 @@ async function stopRecording() {
   const raceId = recordingState.raceId;
 
   try {
-    await set(ref(db, `tracker/races/${raceId}/stoppedAt`), stoppedAt);
-    await set(ref(db, `tracker/races/${raceId}/status`), "finished");
+    await set(
+      ref(db, `tracker/races/${raceId}/stoppedAt`),
+      stoppedAt
+    );
 
-    await set(ref(db, "tracker/config/recording"), {
-      ...recordingState,
-      enabled: false,
-      stoppedAt,
-      requestedAt: stoppedAt
-    });
+    await set(
+      ref(db, `tracker/races/${raceId}/status`),
+      "finished"
+    );
+
+    await set(
+      ref(db, "tracker/config/recording"),
+      {
+        ...recordingState,
+        enabled: false,
+        stoppedAt,
+        requestedAt: stoppedAt
+      }
+    );
 
     alert("Rennaufzeichnung gestoppt.");
   } catch (error) {
-    alert("Stop fehlgeschlagen: " + error.message);
+    alert(
+      "Stop fehlgeschlagen: " + error.message
+    );
   }
 }
 
 function createRaceId(timestamp) {
   const d = new Date(timestamp);
-  const p = n => String(n).padStart(2, "0");
-  return `race_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+
+  const p = n =>
+    String(n).padStart(2, "0");
+
+  return (
+    `race_${d.getFullYear()}` +
+    `${p(d.getMonth() + 1)}` +
+    `${p(d.getDate())}_` +
+    `${p(d.getHours())}` +
+    `${p(d.getMinutes())}` +
+    `${p(d.getSeconds())}`
+  );
 }
 
 async function resetMaxValues() {
-  const button = document.getElementById("resetMaxValues");
+  const button =
+    document.getElementById("resetMaxValues");
+
   const originalText = button.innerText;
+
   button.disabled = true;
   button.innerText = "Wird zurückgesetzt...";
 
   try {
-    const snapshot = await get(ref(db, "tracker/live"));
+    const snapshot = await get(
+      ref(db, "tracker/live")
+    );
+
     const live = snapshot.val() || {};
 
-    await set(ref(db, "tracker/maxValues"), {
-      maxSpeed: readLiveNumber(live.speed_kmh),
-      maxRpm: readLiveNumber(live.rpm),
-      maxOilTemp: readLiveNumber(live.oil_temp),
-      maxCylTemp: readLiveNumber(live.cylinder_temp),
-      minOilPressure: readLiveNumber(live.oil_pressure),
-      minBattery: readLiveNumber(live.battery_v),
-      resetAt: Date.now()
-    });
+    await set(
+      ref(db, "tracker/maxValues"),
+      {
+        maxSpeed: readLiveNumber(live.speed_kmh),
+        maxRpm: readLiveNumber(live.rpm),
+        maxOilTemp: readLiveNumber(live.oil_temp),
+        maxCylTemp: readLiveNumber(live.cylinder_temp),
+        minOilPressure: readLiveNumber(live.oil_pressure),
+        minBattery: readLiveNumber(live.battery_v),
+        resetAt: Date.now()
+      }
+    );
 
-    alert("Maximalwerte wurden auf die aktuellen Live-Werte zurückgesetzt.");
+    alert(
+      "Maximalwerte wurden auf die aktuellen Live-Werte zurückgesetzt."
+    );
   } catch (error) {
-    alert("Fehler beim Zurücksetzen: " + error.message);
+    alert(
+      "Fehler beim Zurücksetzen: " + error.message
+    );
   } finally {
     button.disabled = false;
     button.innerText = originalText;
@@ -342,22 +606,60 @@ async function resetMaxValues() {
 function listenMaxValues() {
   onValue(ref(db, "tracker/maxValues"), snapshot => {
     const m = snapshot.val() || {};
-    setText("maxSpeed", m.maxSpeed != null ? Number(m.maxSpeed).toFixed(1) : "---");
-    setText("maxRpm", m.maxRpm != null ? Math.round(m.maxRpm) : "---");
-    setText("maxOilTemp", m.maxOilTemp != null ? Math.round(m.maxOilTemp) : "---");
-    setText("maxCylTemp", m.maxCylTemp != null ? Math.round(m.maxCylTemp) : "---");
-    setText("minOilPressure", m.minOilPressure != null ? Number(m.minOilPressure).toFixed(1) : "---");
-    setText("minBattery", m.minBattery != null ? Number(m.minBattery).toFixed(1) : "---");
+
+    setText(
+      "maxSpeed",
+      m.maxSpeed != null
+        ? Number(m.maxSpeed).toFixed(1)
+        : "---"
+    );
+
+    setText(
+      "maxRpm",
+      m.maxRpm != null
+        ? Math.round(m.maxRpm)
+        : "---"
+    );
+
+    setText(
+      "maxOilTemp",
+      m.maxOilTemp != null
+        ? Math.round(m.maxOilTemp)
+        : "---"
+    );
+
+    setText(
+      "maxCylTemp",
+      m.maxCylTemp != null
+        ? Math.round(m.maxCylTemp)
+        : "---"
+    );
+
+    setText(
+      "minOilPressure",
+      m.minOilPressure != null
+        ? Number(m.minOilPressure).toFixed(1)
+        : "---"
+    );
+
+    setText(
+      "minBattery",
+      m.minBattery != null
+        ? Number(m.minBattery).toFixed(1)
+        : "---"
+    );
   });
 }
 
 function listenAlarmHistory() {
   onValue(ref(db, "tracker/alarmHistory"), snapshot => {
     const history = snapshot.val() || [];
-    const container = document.getElementById("alarmHistory");
+    const container =
+      document.getElementById("alarmHistory");
 
     if (!history.length) {
-      container.innerHTML = '<div class="empty-history">Noch keine Alarme.</div>';
+      container.innerHTML =
+        '<div class="empty-history">Noch keine Alarme.</div>';
       return;
     }
 
@@ -371,9 +673,19 @@ function listenAlarmHistory() {
 }
 
 function readLiveNumber(value) {
-  if (value === undefined || value === null || value === "") return null;
+  if (
+    value === undefined ||
+    value === null ||
+    value === ""
+  ) {
+    return null;
+  }
+
   const number = Number(value);
-  return Number.isNaN(number) ? null : number;
+
+  return Number.isNaN(number)
+    ? null
+    : number;
 }
 
 function setInput(id, value) {
@@ -381,7 +693,9 @@ function setInput(id, value) {
 }
 
 function readInput(id) {
-  return Number(document.getElementById(id).value);
+  return Number(
+    document.getElementById(id).value
+  );
 }
 
 function setText(id, value) {

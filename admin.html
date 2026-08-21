@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MF35X Admin V9.5.1</title>
+  <title>MF35X Admin V9.5.2</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=9.5.1">
+  <link rel="stylesheet" href="style.css?v=9.5.2">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.5.1</div>
+  <div class="version">Version 9.5.2</div>
 </header>
 
 <main>
@@ -44,13 +44,51 @@
   </section>
 
   <section class="settings admin-settings">
-    <h2>Aktualisierungsintervalle</h2>
+    <h2>Externer High/Low-Ausgang</h2>
+
     <div class="settings-grid">
       <label>
-        5-V-Drehzahl-Rechteckausgang (ms)
-        <input id="setRpmOutputUpdateMs" type="number" min="5" max="200" step="1">
-        <span class="field-hint">Frequenzanpassung des kontinuierlichen Rechtecksignals · Standard 10 ms</span>
+        Geschwindigkeitsfreigabe (km/h)
+        <input id="setOutputSpeedEnableKmh" type="number" min="0" max="200" step="1">
+        <span class="field-hint">
+          Der Ausgang kann erst HIGH werden, wenn diese Geschwindigkeit erreicht oder überschritten ist.
+        </span>
       </label>
+
+      <label>
+        HIGH ab Drehzahl (U/min)
+        <input id="setOutputRpmOn" type="number" min="0" max="10000" step="10">
+        <span class="field-hint">
+          Ab dieser Drehzahl schaltet der externe Ausgang auf HIGH.
+        </span>
+      </label>
+
+      <label>
+        LOW unter Drehzahl (U/min)
+        <input id="setOutputRpmOff" type="number" min="0" max="10000" step="10">
+        <span class="field-hint">
+          Unter diesem Wert schaltet der Ausgang wieder auf LOW.
+        </span>
+      </label>
+    </div>
+
+    <p class="settings-note settings-note-block">
+      Die getrennten Ein- und Ausschaltwerte erzeugen eine Hysterese und verhindern ein schnelles
+      Hin- und Herschalten an der Drehzahlgrenze. Beispiel: HIGH ab 3200 U/min, LOW wieder unter
+      3150 U/min. Wird die eingestellte Geschwindigkeitsfreigabe unterschritten, soll der Ausgang
+      unabhängig von der Drehzahl LOW sein.
+    </p>
+
+    <div class="settings-actions">
+      <button id="saveOutputConfig" class="save-button">Ausgang speichern</button>
+      <button id="resetOutputConfig" class="reset-button">Standardwerte laden</button>
+      <span id="outputConfigStatus" class="config-status">Noch nicht geladen.</span>
+    </div>
+  </section>
+
+  <section class="settings admin-settings">
+    <h2>Aktualisierungsintervalle</h2>
+    <div class="settings-grid">
 
       <label>
         Drehzahl zu Firebase/Website (ms)
@@ -84,8 +122,6 @@
     </div>
 
     <p class="settings-note settings-note-block">
-      Der 5-V-Rechteckausgang läuft dauerhaft. Sein Intervall bestimmt nur, wie oft die
-      Ausgangsfrequenz an die neu berechnete Drehzahl angepasst wird.
       GPS-Position und GPS-Geschwindigkeit stammen aus demselben GPS-Datensatz.
     </p>
 
@@ -112,6 +148,7 @@
         <input id="raceName" type="text" maxlength="60" placeholder="z. B. Reingers 24h 2027">
         <span class="field-hint">Wird später in der Rennauswertung angezeigt.</span>
       </label>
+
       <label>
         Aktuelle Renn-ID
         <input id="currentRaceId" type="text" readonly placeholder="---">
@@ -136,13 +173,37 @@
       <h2>Maximalwerte</h2>
       <button id="resetMaxValues" class="small-button">Zurücksetzen</button>
     </div>
+
     <div class="max-grid">
-      <div class="max-item"><div class="max-label">Max. Geschwindigkeit</div><div class="max-value"><span id="maxSpeed">---</span> km/h</div></div>
-      <div class="max-item"><div class="max-label">Max. Drehzahl</div><div class="max-value"><span id="maxRpm">---</span> U/min</div></div>
-      <div class="max-item"><div class="max-label">Max. Öltemperatur</div><div class="max-value"><span id="maxOilTemp">---</span> °C</div></div>
-      <div class="max-item"><div class="max-label">Max. Zylindertemperatur</div><div class="max-value"><span id="maxCylTemp">---</span> °C</div></div>
-      <div class="max-item"><div class="max-label">Min. Öldruck</div><div class="max-value"><span id="minOilPressure">---</span> bar</div></div>
-      <div class="max-item"><div class="max-label">Min. Batteriespannung</div><div class="max-value"><span id="minBattery">---</span> V</div></div>
+      <div class="max-item">
+        <div class="max-label">Max. Geschwindigkeit</div>
+        <div class="max-value"><span id="maxSpeed">---</span> km/h</div>
+      </div>
+
+      <div class="max-item">
+        <div class="max-label">Max. Drehzahl</div>
+        <div class="max-value"><span id="maxRpm">---</span> U/min</div>
+      </div>
+
+      <div class="max-item">
+        <div class="max-label">Max. Öltemperatur</div>
+        <div class="max-value"><span id="maxOilTemp">---</span> °C</div>
+      </div>
+
+      <div class="max-item">
+        <div class="max-label">Max. Zylindertemperatur</div>
+        <div class="max-value"><span id="maxCylTemp">---</span> °C</div>
+      </div>
+
+      <div class="max-item">
+        <div class="max-label">Min. Öldruck</div>
+        <div class="max-value"><span id="minOilPressure">---</span> bar</div>
+      </div>
+
+      <div class="max-item">
+        <div class="max-label">Min. Batteriespannung</div>
+        <div class="max-value"><span id="minBattery">---</span> V</div>
+      </div>
     </div>
   </section>
 
@@ -156,6 +217,6 @@
 </section>
 </main>
 
-<script type="module" src="admin.js?v=9.5.1"></script>
+<script type="module" src="admin.js?v=9.5.2"></script>
 </body>
 </html>
