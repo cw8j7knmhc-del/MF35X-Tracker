@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.5.1 */
+/* MF35X Tracker Admin V9.5.2 */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -16,8 +16,12 @@ const DEFAULT_LIMITS = {
   cylTempAlarm: 220
 };
 
+const DEFAULT_EXTERNAL_OUTPUT = {
+  speed_threshold_kmh: 60,
+  rpm_threshold: 3200
+};
+
 const DEFAULT_INTERVALS = {
-  rpm_output_update_ms: 10,
   rpm_firebase_update_ms: 250,
   oil_pressure_update_ms: 100,
   temperature_update_ms: 1000,
@@ -26,7 +30,6 @@ const DEFAULT_INTERVALS = {
 };
 
 const INTERVAL_RULES = {
-  rpm_output_update_ms: { id: "setRpmOutputUpdateMs", min: 5, max: 200 },
   rpm_firebase_update_ms: { id: "setRpmFirebaseUpdateMs", min: 100, max: 5000 },
   oil_pressure_update_ms: { id: "setOilPressureUpdateMs", min: 50, max: 5000 },
   temperature_update_ms: { id: "setTemperatureUpdateMs", min: 250, max: 10000 },
@@ -61,6 +64,7 @@ function login() {
 
 function initAdmin() {
   listenSettings();
+  listenExternalOutput();
   listenIntervals();
   listenMaxValues();
   listenAlarmHistory();
@@ -71,6 +75,12 @@ function initAdmin() {
   document.getElementById("resetSettings").addEventListener("click", async () => {
     await set(ref(db, "tracker/settings"), DEFAULT_LIMITS);
     alert("Standardwerte geladen.");
+  });
+
+  document.getElementById("saveExternalOutput").addEventListener("click", saveExternalOutput);
+  document.getElementById("resetExternalOutput").addEventListener("click", async () => {
+    await set(ref(db, "tracker/config/external_output"), DEFAULT_EXTERNAL_OUTPUT);
+    setExternalOutputStatus("Standardwerte gespeichert.", "success");
   });
 
   document.getElementById("saveIntervals").addEventListener("click", saveIntervals);
@@ -119,6 +129,42 @@ async function saveSettings() {
   alert("Alarmgrenzen gespeichert.");
 }
 
+function listenExternalOutput() {
+  const outputRef = ref(db, "tracker/config/external_output");
+
+  onValue(outputRef, async snapshot => {
+    const stored = snapshot.val();
+
+    if (!stored) {
+      await set(outputRef, DEFAULT_EXTERNAL_OUTPUT);
+      return;
+    }
+
+    const values = { ...DEFAULT_EXTERNAL_OUTPUT, ...stored };
+    setInput("setExternalOutputSpeedKmh", values.speed_threshold_kmh);
+    setInput("setExternalOutputRpm", values.rpm_threshold);
+    setExternalOutputStatus("Ausgangswerte aus Firebase geladen.", "success");
+  }, error => {
+    setExternalOutputStatus("Firebase-Lesefehler: " + error.message, "error");
+  });
+}
+
+async function saveExternalOutput() {
+  try {
+    const values = {
+      speed_threshold_kmh: readBoundedNumber("setExternalOutputSpeedKmh", 0, 200, "km/h"),
+      rpm_threshold: readBoundedInteger("setExternalOutputRpm", 0, 10000, "U/min")
+    };
+
+    setExternalOutputStatus("Wird gespeichert…", "pending");
+    await set(ref(db, "tracker/config/external_output"), values);
+    setExternalOutputStatus("Ausgangswerte gespeichert.", "success");
+  } catch (error) {
+    setExternalOutputStatus(error.message, "error");
+    alert(error.message);
+  }
+}
+
 function listenIntervals() {
   const intervalsRef = ref(db, "tracker/config/intervals");
 
@@ -146,7 +192,7 @@ async function saveIntervals() {
     const intervals = {};
 
     for (const [key, rule] of Object.entries(INTERVAL_RULES)) {
-      intervals[key] = readBoundedInteger(rule.id, rule.min, rule.max);
+      intervals[key] = readBoundedInteger(rule.id, rule.min, rule.max, "ms");
     }
 
     setIntervalStatus("Wird gespeichert…", "pending");
@@ -158,16 +204,29 @@ async function saveIntervals() {
   }
 }
 
-function readBoundedInteger(id, min, max) {
-  const input = document.getElementById(id);
-  const value = Number(input.value);
+function readBoundedInteger(id, min, max, unit = "") {
+  const value = Number(document.getElementById(id).value);
 
   if (!Number.isInteger(value)) {
-    throw new Error("Bitte nur ganze Millisekundenwerte eingeben.");
+    throw new Error(`Bitte bei ${unit || "diesem Feld"} nur ganze Zahlen eingeben.`);
   }
 
   if (value < min || value > max) {
-    throw new Error(`Der Wert muss zwischen ${min} und ${max} ms liegen.`);
+    throw new Error(`Der Wert muss zwischen ${min} und ${max}${unit ? " " + unit : ""} liegen.`);
+  }
+
+  return value;
+}
+
+function readBoundedNumber(id, min, max, unit = "") {
+  const value = Number(document.getElementById(id).value);
+
+  if (!Number.isFinite(value)) {
+    throw new Error("Bitte einen gültigen Zahlenwert eingeben.");
+  }
+
+  if (value < min || value > max) {
+    throw new Error(`Der Wert muss zwischen ${min} und ${max}${unit ? " " + unit : ""} liegen.`);
   }
 
   return value;
@@ -180,6 +239,12 @@ function setIntervalStatus(text, state = "") {
   if (state) element.classList.add(`config-status-${state}`);
 }
 
+function setExternalOutputStatus(text, state = "") {
+  const element = document.getElementById("externalOutputStatus");
+  element.textContent = text;
+  element.className = "config-status";
+  if (state) element.classList.add(`config-status-${state}`);
+}
 
 let historySupported = false;
 let recordingState = { enabled: false };
@@ -251,7 +316,7 @@ async function startRecording() {
     return;
   }
 
-  const historyInterval = readBoundedInteger("setHistoryUpdateMs", 1000, 60000);
+  const historyInterval = readBoundedInteger("setHistoryUpdateMs", 1000, 60000, "ms");
   const startedAt = Date.now();
   const raceId = createRaceId(startedAt);
 
