@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MF35X Admin V9.5.3</title>
+  <title>MF35X Admin V9.5.4</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="style.css?v=9.5.2">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.5.3</div>
+  <div class="version">Version 9.5.4</div>
 </header>
 
 <main>
@@ -24,6 +24,30 @@
 
 <section id="adminContent" class="hidden">
   <a class="button" href="index.html">Zur Besucheransicht</a>
+
+  <section class="settings admin-settings">
+    <h2>Systemsteuerung</h2>
+
+    <div class="recording-status-row">
+      <span>Firmware:</span>
+      <strong id="systemFirmwareStatus" class="recording-badge recording-badge-wait">wird geladen</strong>
+      <span>Fernsteuerung:</span>
+      <strong id="systemSupportStatus" class="recording-badge recording-badge-wait">wird geprüft</strong>
+    </div>
+
+    <p class="settings-note settings-note-block">
+      Diese drei Funktionen arbeiten rein softwareseitig. Der GPS-Neustart startet den
+      ATGM336H per UART neu und initialisiert anschließend die GPS-Schnittstelle des ESP32 neu.
+      Die Versorgungsspannung des GPS wird dabei nicht abgeschaltet.
+    </p>
+
+    <div class="settings-actions">
+      <button id="restartEsp32" class="reset-button" disabled>ESP32 neu starten</button>
+      <button id="restartWifi" class="reset-button" disabled>WLAN neu starten</button>
+      <button id="restartGps" class="reset-button" disabled>GPS neu starten</button>
+      <span id="systemCommandStatus" class="config-status">Noch kein Befehl gesendet.</span>
+    </div>
+  </section>
 
   <section class="settings admin-settings">
     <h2>Alarmgrenzen</h2>
@@ -217,6 +241,6 @@
 </section>
 </main>
 
-<script type="module" src="admin.js?v=9.5.3"></script>
+<script type="module" src="admin.js?v=9.5.4"></script>
 </body>
 </html>

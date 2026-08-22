@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.5.3 */
+/* MF35X Tracker Admin V9.5.4 */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -65,6 +65,9 @@ const db = getDatabase(app);
 let adminStarted = false;
 let historySupported = false;
 let recordingState = { enabled: false };
+let systemCommandsSupported = false;
+let gpsSoftwareRestartSupported = false;
+let pendingSystemCommand = null;
 
 document.getElementById("loginButton").addEventListener("click", login);
 
@@ -98,6 +101,32 @@ function initAdmin() {
   listenAlarmHistory();
   listenHistorySupport();
   listenRecordingState();
+  listenSystemSupport();
+  listenSystemCommands();
+
+  document.getElementById("restartEsp32").addEventListener("click", () => {
+    sendSystemCommand(
+      "esp32_reboot",
+      "ESP32-Neustart",
+      "ESP32 wirklich neu starten? Die Live-Daten sind für einige Sekunden nicht verfügbar."
+    );
+  });
+
+  document.getElementById("restartWifi").addEventListener("click", () => {
+    sendSystemCommand(
+      "wifi_restart",
+      "WLAN-Neustart",
+      "WLAN wirklich neu starten? Der Tracker trennt kurz die WLAN-Verbindung und verbindet sich danach wieder."
+    );
+  });
+
+  document.getElementById("restartGps").addEventListener("click", () => {
+    sendSystemCommand(
+      "gps_restart",
+      "GPS-Neustart",
+      "GPS wirklich softwareseitig neu starten? Die GPS-Position kann danach kurz ausfallen."
+    );
+  });
 
   document.getElementById("saveSettings").addEventListener("click", saveSettings);
 
@@ -137,6 +166,137 @@ function initAdmin() {
     await set(ref(db, "tracker/alarmHistory"), []);
     alert("Alarmhistorie geleert.");
   });
+}
+
+function listenSystemSupport() {
+  onValue(ref(db, "tracker/device"), snapshot => {
+    const device = snapshot.val() || {};
+
+    systemCommandsSupported =
+      device.systemCommandsSupported === true;
+
+    gpsSoftwareRestartSupported =
+      device.gpsSoftwareRestartSupported === true;
+
+    const firmware = device.firmware || "---";
+    const firmwareBadge =
+      document.getElementById("systemFirmwareStatus");
+
+    firmwareBadge.textContent = firmware;
+    firmwareBadge.className =
+      "recording-badge " +
+      (device.firmware ? "recording-badge-on" : "recording-badge-wait");
+
+    const supportBadge =
+      document.getElementById("systemSupportStatus");
+
+    supportBadge.textContent = systemCommandsSupported
+      ? "bereit"
+      : "nicht unterstützt";
+
+    supportBadge.className =
+      "recording-badge " +
+      (systemCommandsSupported
+        ? "recording-badge-on"
+        : "recording-badge-wait");
+
+    document.getElementById("restartEsp32").disabled =
+      !systemCommandsSupported;
+
+    document.getElementById("restartWifi").disabled =
+      !systemCommandsSupported;
+
+    document.getElementById("restartGps").disabled =
+      !systemCommandsSupported || !gpsSoftwareRestartSupported;
+  });
+}
+
+function listenSystemCommands() {
+  onValue(ref(db, "tracker/config/system_commands"), snapshot => {
+    if (!pendingSystemCommand) return;
+
+    const commands = snapshot.val() || {};
+    const state = commands[pendingSystemCommand.command];
+
+    if (!state || state.requestId !== pendingSystemCommand.requestId) {
+      return;
+    }
+
+    if (state.status === "requested") {
+      setSystemCommandStatus(
+        `${pendingSystemCommand.label}: Befehl gesendet – wartet auf ESP32.`,
+        "pending"
+      );
+    } else if (state.status === "restarting") {
+      setSystemCommandStatus(
+        `${pendingSystemCommand.label}: wird ausgeführt …`,
+        "pending"
+      );
+    } else if (state.status === "completed") {
+      setSystemCommandStatus(
+        `${pendingSystemCommand.label}: erfolgreich abgeschlossen.`,
+        "success"
+      );
+      pendingSystemCommand = null;
+    }
+  });
+}
+
+async function sendSystemCommand(command, label, confirmText) {
+  if (!systemCommandsSupported) {
+    alert(
+      "Die aktuell erkannte ESP32-Firmware unterstützt die Systemsteuerung noch nicht. Bitte zuerst V5.9.1 aufspielen."
+    );
+    return;
+  }
+
+  if (command === "gps_restart" && !gpsSoftwareRestartSupported) {
+    alert("Die aktuelle Firmware unterstützt den GPS-Software-Neustart nicht.");
+    return;
+  }
+
+  if (!confirm(confirmText)) return;
+
+  const requestId = createSystemCommandId();
+  pendingSystemCommand = { command, label, requestId };
+
+  setSystemCommandStatus(`${label}: wird gesendet …`, "pending");
+
+  try {
+    await set(
+      ref(db, `tracker/config/system_commands/${command}`),
+      {
+        requestId,
+        requestedAt: Date.now(),
+        status: "requested"
+      }
+    );
+  } catch (error) {
+    pendingSystemCommand = null;
+    setSystemCommandStatus(
+      `${label}: Senden fehlgeschlagen – ${error.message}`,
+      "error"
+    );
+  }
+}
+
+function createSystemCommandId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return `${Date.now()}-${globalThis.crypto.randomUUID()}`;
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function setSystemCommandStatus(text, state = "") {
+  const element = document.getElementById("systemCommandStatus");
+
+  element.textContent = text;
+  element.className = "config-status";
+
+  if (state) {
+    element.classList.add(`config-status-${state}`);
+  }
 }
 
 function listenSettings() {
