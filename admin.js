@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.5.2 */
+/* MF35X Tracker Admin V9.5.3 */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -49,8 +49,8 @@ const INTERVAL_RULES = {
   },
   gps_update_ms: {
     id: "setGpsUpdateMs",
-    min: 1000,
-    max: 30000
+    min: 100,
+    max: 3000
   },
   history_update_ms: {
     id: "setHistoryUpdateMs",
