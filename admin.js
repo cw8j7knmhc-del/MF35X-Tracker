@@ -4,7 +4,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
-const ADMIN_PASSWORD = "mf35x";
+const ADMIN_PASSWORD = "mf35";
 
 const DEFAULT_LIMITS = {
   batteryWarn: 12.2,
