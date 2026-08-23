@@ -1,4 +1,4 @@
-/* MF35X Tracker V9.5.5 – GPS-Fix unabhängig von ESP32-Online-Status */
+/* MF35X Tracker V9.5.6 – V9.5.1-Layout + GPS-Fix unabhängig vom ESP32-Online-Status */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
