@@ -1,10 +1,12 @@
-/* MF35X Tracker Admin V9.5.5 */
+/* MF35X Tracker Admin V9.5.7 */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const ADMIN_PASSWORD = "mf35x";
+const OTA_MANIFEST_URL =
+  "https://raw.githubusercontent.com/cw8j7knmhc-del/MF35X-Tracker/main/firmware/manifest.json";
 
 const DEFAULT_LIMITS = {
   batteryWarn: 12.2,
@@ -67,6 +69,10 @@ let historySupported = false;
 let recordingState = { enabled: false };
 let systemCommandsSupported = false;
 let gpsSoftwareRestartSupported = false;
+let otaSupported = false;
+let otaPartitionReady = false;
+let currentFirmwareVersionCode = 0;
+let latestOtaManifest = null;
 let pendingSystemCommand = null;
 
 document.getElementById("loginButton").addEventListener("click", login);
@@ -128,6 +134,9 @@ function initAdmin() {
     );
   });
 
+  document.getElementById("checkFirmwareUpdate").addEventListener("click", checkFirmwareUpdate);
+  document.getElementById("installFirmwareUpdate").addEventListener("click", installFirmwareUpdate);
+
   document.getElementById("saveSettings").addEventListener("click", saveSettings);
 
   document.getElementById("resetSettings").addEventListener("click", async () => {
@@ -172,43 +181,128 @@ function listenSystemSupport() {
   onValue(ref(db, "tracker/device"), snapshot => {
     const device = snapshot.val() || {};
 
-    systemCommandsSupported =
-      device.systemCommandsSupported === true;
-
-    gpsSoftwareRestartSupported =
-      device.gpsSoftwareRestartSupported === true;
+    systemCommandsSupported = device.systemCommandsSupported === true;
+    gpsSoftwareRestartSupported = device.gpsSoftwareRestartSupported === true;
+    otaSupported = device.otaSupported === true && device.otaSignedUpdates === true;
+    otaPartitionReady = device.otaPartitionReady === true;
+    currentFirmwareVersionCode = Number(device.firmwareVersionCode || 0);
 
     const firmware = device.firmware || "---";
-    const firmwareBadge =
-      document.getElementById("systemFirmwareStatus");
-
+    const firmwareBadge = document.getElementById("systemFirmwareStatus");
     firmwareBadge.textContent = firmware;
     firmwareBadge.className =
       "recording-badge " +
       (device.firmware ? "recording-badge-on" : "recording-badge-wait");
 
-    const supportBadge =
-      document.getElementById("systemSupportStatus");
-
-    supportBadge.textContent = systemCommandsSupported
-      ? "bereit"
-      : "nicht unterstützt";
-
+    const supportBadge = document.getElementById("systemSupportStatus");
+    supportBadge.textContent = systemCommandsSupported ? "bereit" : "nicht unterstützt";
     supportBadge.className =
       "recording-badge " +
-      (systemCommandsSupported
-        ? "recording-badge-on"
-        : "recording-badge-wait");
+      (systemCommandsSupported ? "recording-badge-on" : "recording-badge-wait");
 
-    document.getElementById("restartEsp32").disabled =
-      !systemCommandsSupported;
+    const otaBadge = document.getElementById("otaSupportStatus");
+    if (!otaSupported) {
+      otaBadge.textContent = "Firmware ohne OTA";
+      otaBadge.className = "recording-badge recording-badge-wait";
+    } else if (!otaPartitionReady) {
+      otaBadge.textContent = "OTA-Partition fehlt";
+      otaBadge.className = "recording-badge recording-badge-wait";
+    } else {
+      otaBadge.textContent = device.otaAutomaticRollback === true
+        ? "signiert + Rollback"
+        : "signiert";
+      otaBadge.className = "recording-badge recording-badge-on";
+    }
 
-    document.getElementById("restartWifi").disabled =
-      !systemCommandsSupported;
-
+    document.getElementById("restartEsp32").disabled = !systemCommandsSupported;
+    document.getElementById("restartWifi").disabled = !systemCommandsSupported;
     document.getElementById("restartGps").disabled =
       !systemCommandsSupported || !gpsSoftwareRestartSupported;
+    document.getElementById("checkFirmwareUpdate").disabled =
+      !systemCommandsSupported || !otaSupported || !otaPartitionReady;
+
+    updateInstallButton();
   });
+}
+
+async function checkFirmwareUpdate() {
+  if (!otaSupported || !otaPartitionReady) {
+    setOtaStatus("OTA ist auf der aktuell laufenden Firmware noch nicht bereit.", "error");
+    return;
+  }
+
+  setOtaStatus("Prüfe GitHub auf eine neue signierte Firmware …", "pending");
+  document.getElementById("installFirmwareUpdate").disabled = true;
+
+  try {
+    const response = await fetch(`${OTA_MANIFEST_URL}?t=${Date.now()}`, {
+      cache: "no-store"
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const manifest = await response.json();
+    if (!manifest ||
+        typeof manifest.version !== "string" ||
+        !Number.isInteger(Number(manifest.versionCode)) ||
+        manifest.signed !== true) {
+      throw new Error("Manifest ist ungültig");
+    }
+
+    latestOtaManifest = manifest;
+    const latestBadge = document.getElementById("otaLatestVersion");
+    latestBadge.textContent = manifest.version;
+
+    if (Number(manifest.versionCode) > currentFirmwareVersionCode) {
+      latestBadge.className = "recording-badge recording-badge-on";
+      setOtaStatus(`Update ${manifest.version} ist verfügbar.`, "success");
+    } else {
+      latestBadge.className = "recording-badge recording-badge-wait";
+      setOtaStatus("Die installierte Firmware ist aktuell.", "success");
+    }
+
+    updateInstallButton();
+  } catch (error) {
+    latestOtaManifest = null;
+    document.getElementById("otaLatestVersion").textContent = "Prüfung fehlgeschlagen";
+    document.getElementById("otaLatestVersion").className =
+      "recording-badge recording-badge-wait";
+    setOtaStatus(`Updateprüfung fehlgeschlagen: ${error.message}`, "error");
+  }
+}
+
+function updateInstallButton() {
+  const button = document.getElementById("installFirmwareUpdate");
+  if (!button) return;
+
+  const newer = latestOtaManifest &&
+    Number(latestOtaManifest.versionCode) > currentFirmwareVersionCode;
+
+  button.disabled = !systemCommandsSupported || !otaSupported || !otaPartitionReady || !newer;
+}
+
+async function installFirmwareUpdate() {
+  if (!latestOtaManifest ||
+      Number(latestOtaManifest.versionCode) <= currentFirmwareVersionCode) {
+    await checkFirmwareUpdate();
+    return;
+  }
+
+  const target = latestOtaManifest.version;
+  await sendSystemCommand(
+    "ota_update",
+    `Firmwareupdate auf ${target}`,
+    `Firmware ${target} wirklich installieren? Der Tracker startet danach automatisch neu.`
+  );
+}
+
+function setOtaStatus(text, state = "") {
+  const element = document.getElementById("otaStatus");
+  element.textContent = text;
+  element.className = "config-status";
+  if (state) element.classList.add(`config-status-${state}`);
 }
 
 function listenSystemCommands() {
@@ -217,26 +311,45 @@ function listenSystemCommands() {
 
     const commands = snapshot.val() || {};
     const state = commands[pendingSystemCommand.command];
+    if (!state || state.requestId !== pendingSystemCommand.requestId) return;
 
-    if (!state || state.requestId !== pendingSystemCommand.requestId) {
-      return;
-    }
+    const detail = state.message ? ` – ${state.message}` : "";
 
     if (state.status === "requested") {
       setSystemCommandStatus(
         `${pendingSystemCommand.label}: Befehl gesendet – wartet auf ESP32.`,
         "pending"
       );
-    } else if (state.status === "restarting") {
+    } else if (["checking", "downloading", "verifying", "restarting"].includes(state.status)) {
       setSystemCommandStatus(
-        `${pendingSystemCommand.label}: wird ausgeführt …`,
+        `${pendingSystemCommand.label}: ${state.status}${detail}`,
         "pending"
       );
+      if (pendingSystemCommand.command === "ota_update") {
+        setOtaStatus(`${pendingSystemCommand.label}: ${state.status}${detail}`, "pending");
+      }
     } else if (state.status === "completed") {
       setSystemCommandStatus(
-        `${pendingSystemCommand.label}: erfolgreich abgeschlossen.`,
+        `${pendingSystemCommand.label}: erfolgreich abgeschlossen${detail}.`,
         "success"
       );
+      if (pendingSystemCommand.command === "ota_update") {
+        setOtaStatus(`Firmwareupdate erfolgreich${detail}.`, "success");
+        latestOtaManifest = null;
+        updateInstallButton();
+      }
+      pendingSystemCommand = null;
+    } else if (state.status === "no_update") {
+      setSystemCommandStatus(`${pendingSystemCommand.label}: kein Update nötig${detail}.`, "success");
+      if (pendingSystemCommand.command === "ota_update") {
+        setOtaStatus(`Kein Update nötig${detail}.`, "success");
+      }
+      pendingSystemCommand = null;
+    } else if (state.status === "error") {
+      setSystemCommandStatus(`${pendingSystemCommand.label}: Fehler${detail}.`, "error");
+      if (pendingSystemCommand.command === "ota_update") {
+        setOtaStatus(`Firmwareupdate fehlgeschlagen${detail}.`, "error");
+      }
       pendingSystemCommand = null;
     }
   });
@@ -244,9 +357,7 @@ function listenSystemCommands() {
 
 async function sendSystemCommand(command, label, confirmText) {
   if (!systemCommandsSupported) {
-    alert(
-      "Die aktuell erkannte ESP32-Firmware unterstützt die Systemsteuerung noch nicht. Bitte zuerst V5.9.1 aufspielen."
-    );
+    alert("Die aktuell erkannte ESP32-Firmware unterstützt die Systemsteuerung nicht.");
     return;
   }
 
@@ -255,28 +366,26 @@ async function sendSystemCommand(command, label, confirmText) {
     return;
   }
 
+  if (command === "ota_update" && (!otaSupported || !otaPartitionReady)) {
+    alert("Online-Firmwareupdate ist auf diesem ESP32 noch nicht bereit.");
+    return;
+  }
+
   if (!confirm(confirmText)) return;
 
   const requestId = createSystemCommandId();
   pendingSystemCommand = { command, label, requestId };
-
   setSystemCommandStatus(`${label}: wird gesendet …`, "pending");
 
   try {
-    await set(
-      ref(db, `tracker/config/system_commands/${command}`),
-      {
-        requestId,
-        requestedAt: Date.now(),
-        status: "requested"
-      }
-    );
+    await set(ref(db, `tracker/config/system_commands/${command}`), {
+      requestId,
+      requestedAt: Date.now(),
+      status: "requested"
+    });
   } catch (error) {
     pendingSystemCommand = null;
-    setSystemCommandStatus(
-      `${label}: Senden fehlgeschlagen – ${error.message}`,
-      "error"
-    );
+    setSystemCommandStatus(`${label}: Senden fehlgeschlagen – ${error.message}`, "error");
   }
 }
 
@@ -284,19 +393,14 @@ function createSystemCommandId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
     return `${Date.now()}-${globalThis.crypto.randomUUID()}`;
   }
-
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function setSystemCommandStatus(text, state = "") {
   const element = document.getElementById("systemCommandStatus");
-
   element.textContent = text;
   element.className = "config-status";
-
-  if (state) {
-    element.classList.add(`config-status-${state}`);
-  }
+  if (state) element.classList.add(`config-status-${state}`);
 }
 
 function listenSettings() {

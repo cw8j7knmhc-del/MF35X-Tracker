@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MF35X Admin V9.5.5</title>
+  <title>MF35X Admin V9.5.7</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="style.css?v=9.5.2">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.5.5</div>
+  <div class="version">Version 9.5.7</div>
 </header>
 
 <main>
@@ -46,6 +46,25 @@
       <button id="restartWifi" class="reset-button" disabled>WLAN neu starten</button>
       <button id="restartGps" class="reset-button" disabled>GPS neu starten</button>
       <span id="systemCommandStatus" class="config-status">Noch kein Befehl gesendet.</span>
+    </div>
+
+    <div class="recording-status-row">
+      <span>Online-Update:</span>
+      <strong id="otaSupportStatus" class="recording-badge recording-badge-wait">wird geprüft</strong>
+      <span>Neueste Version:</span>
+      <strong id="otaLatestVersion" class="recording-badge recording-badge-wait">noch nicht geprüft</strong>
+    </div>
+
+    <p class="settings-note settings-note-block">
+      Online-Firmwareupdates werden vom ESP32 selbst geladen und vor der Installation
+      mit RSA/SHA-256 geprüft. Die Updatequelle ist fest auf dieses MF35X-GitHub-Repository
+      begrenzt. Eine neue Firmware wird erst nach 30 Sekunden stabilem Lauf endgültig bestätigt.
+    </p>
+
+    <div class="settings-actions">
+      <button id="checkFirmwareUpdate" class="reset-button" disabled>Nach Update suchen</button>
+      <button id="installFirmwareUpdate" class="save-button" disabled>Firmware aktualisieren</button>
+      <span id="otaStatus" class="config-status">Noch nicht geprüft.</span>
     </div>
   </section>
 
@@ -241,6 +260,6 @@
 </section>
 </main>
 
-<script type="module" src="admin.js?v=9.5.5"></script>
+<script type="module" src="admin.js?v=9.5.7"></script>
 </body>
 </html>

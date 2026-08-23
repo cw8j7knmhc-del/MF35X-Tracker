@@ -1,0 +1,14 @@
+# Local secrets - NEVER commit
+esp32/MF35X_Livetracker/secrets.h
+**/secrets.h
+*.pem
+private_key*
+
+# Build outputs
+build/
+*.elf
+*.map
+
+# OS/editor
+.DS_Store
+Thumbs.db
