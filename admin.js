@@ -1,7 +1,7 @@
-/* MF35X Tracker Admin V9.5.7 */
+/* MF35X Tracker Admin V9.5.8 */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, onValue, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getDatabase, ref, onValue, set, get, update, query, orderByChild, startAt, endAt } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const ADMIN_PASSWORD = "mf35x";
@@ -75,6 +75,34 @@ let currentFirmwareVersionCode = 0;
 let latestOtaManifest = null;
 let pendingSystemCommand = null;
 
+
+// ==================================================
+// RENNAUSWERTUNG - NUR NACH ADMIN-LOGIN INITIALISIERT
+// ==================================================
+const ANALYSIS_METRICS = {
+  cylinder_temp: { label: "Zylinderkopf", unit: "°C", color: "#ff4040", group: "temperature", decimals: 0 },
+  oil_temp: { label: "Motoröl", unit: "°C", color: "#ff951f", group: "temperature", decimals: 0 },
+  gear_oil_temp: { label: "Getriebeöl", unit: "°C", color: "#ffd24b", group: "temperature", decimals: 0 },
+  oil_pressure: { label: "Öldruck", unit: "bar", color: "#2e9bff", group: "operating", decimals: 1, axis: "yPressure" },
+  rpm: { label: "Drehzahl", unit: "U/min", color: "#a04cff", group: "operating", decimals: 0, axis: "yRpm" },
+  speed_kmh: { label: "Geschwindigkeit", unit: "km/h", color: "#43ff5f", group: "operating", decimals: 1, axis: "ySpeed" }
+};
+
+let analysisRaces = {};
+let analysisCurrentSamples = [];
+let analysisCurrentRaceId = "";
+let analysisSettings = {};
+let analysisTemperatureChart = null;
+let analysisOperatingChart = null;
+let analysisInitialized = false;
+let analysisRaceSelect = null;
+let analysisFromTime = null;
+let analysisToTime = null;
+let analysisLoadRangeButton = null;
+let analysisLoadFullButton = null;
+let analysisExportButton = null;
+let analysisDeleteButton = null;
+
 document.getElementById("loginButton").addEventListener("click", login);
 
 document.getElementById("adminPassword").addEventListener("keydown", event => {
@@ -94,6 +122,10 @@ function login() {
       adminStarted = true;
       initAdmin();
     }
+
+    if (location.hash === "#raceAnalysis") {
+      setTimeout(() => document.getElementById("raceAnalysis")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    }
   } else {
     alert("Falsches Passwort.");
   }
@@ -109,6 +141,7 @@ function initAdmin() {
   listenRecordingState();
   listenSystemSupport();
   listenSystemCommands();
+  initRaceAnalysis();
 
   document.getElementById("restartEsp32").addEventListener("click", () => {
     sendSystemCommand(
@@ -679,6 +712,7 @@ function listenRecordingState() {
     }
 
     updateRecordingButtons();
+    updateAnalysisDeleteButton();
   });
 }
 
@@ -934,6 +968,617 @@ function listenAlarmHistory() {
       </div>
     `).join("");
   });
+}
+
+
+// ==================================================
+// RENNAUSWERTUNG / LÖSCHEN VON RENNAUFZEICHNUNGEN
+// ==================================================
+function initRaceAnalysis() {
+  if (analysisInitialized) return;
+  analysisInitialized = true;
+
+  analysisRaceSelect = document.getElementById("raceSelect");
+  analysisFromTime = document.getElementById("fromTime");
+  analysisToTime = document.getElementById("toTime");
+  analysisLoadRangeButton = document.getElementById("loadRange");
+  analysisLoadFullButton = document.getElementById("loadFullRace");
+  analysisExportButton = document.getElementById("exportCsv");
+  analysisDeleteButton = document.getElementById("deleteRace");
+
+  if (!analysisRaceSelect || !analysisLoadRangeButton || !analysisLoadFullButton ||
+      !analysisExportButton || !analysisDeleteButton) {
+    console.warn("Rennauswertung: benötigte Admin-Elemente fehlen.");
+    return;
+  }
+
+  analysisRaceSelect.addEventListener("change", analysisOnRaceChange);
+  analysisLoadRangeButton.addEventListener("click", analysisLoadSelectedRange);
+  analysisLoadFullButton.addEventListener("click", analysisLoadFullRace);
+  analysisExportButton.addEventListener("click", analysisExportCsv);
+  analysisDeleteButton.addEventListener("click", deleteSelectedRace);
+  document.querySelectorAll(".metric-toggle").forEach(cb =>
+    cb.addEventListener("change", analysisRenderCharts)
+  );
+
+  if (typeof Chart === "undefined") {
+    analysisSetStatus("Chart.js konnte nicht geladen werden.", "error");
+  }
+
+  loadAnalysisSettings();
+  listenAnalysisRaces();
+}
+
+async function loadAnalysisSettings() {
+  try {
+    const snapshot = await get(ref(db, "tracker/settings"));
+    analysisSettings = snapshot.val() || {};
+  } catch (error) {
+    console.warn("Rennauswertung: Alarmgrenzen konnten nicht geladen werden:", error);
+  }
+}
+
+function listenAnalysisRaces() {
+  analysisSetStatus("Lade Rennaufzeichnungen…", "pending");
+
+  onValue(
+    ref(db, "tracker/races"),
+    snapshot => {
+      analysisRaces = snapshot.val() || {};
+      populateAnalysisRaceSelect();
+    },
+    error => {
+      analysisSetStatus("Rennaufzeichnungen konnten nicht geladen werden: " + error.message, "error");
+    }
+  );
+}
+
+function populateAnalysisRaceSelect() {
+  const entries = Object.entries(analysisRaces)
+    .sort((a, b) => Number(b[1]?.startedAt || 0) - Number(a[1]?.startedAt || 0));
+
+  const previous = analysisRaceSelect.value || analysisCurrentRaceId;
+  analysisRaceSelect.innerHTML = "";
+
+  if (!entries.length) {
+    analysisRaceSelect.innerHTML = '<option value="">Noch keine Rennaufzeichnung vorhanden</option>';
+    analysisRaceSelect.disabled = true;
+    analysisLoadRangeButton.disabled = true;
+    analysisLoadFullButton.disabled = true;
+    analysisExportButton.disabled = true;
+    analysisDeleteButton.disabled = true;
+    analysisCurrentRaceId = "";
+    analysisCurrentSamples = [];
+    document.getElementById("raceInfo").textContent = "Noch keine Rennaufzeichnung vorhanden.";
+    document.getElementById("sampleCount").textContent = "0 Datensätze";
+    analysisRenderCharts();
+    analysisRenderStats();
+    analysisSetStatus("Noch keine Rennen in Firebase.", "pending");
+    return;
+  }
+
+  for (const [id, meta] of entries) {
+    const option = document.createElement("option");
+    option.value = id;
+    option.textContent = `${meta.name || id} · ${analysisFormatDateTime(meta.startedAt)}`;
+    analysisRaceSelect.appendChild(option);
+  }
+
+  analysisRaceSelect.disabled = false;
+  analysisLoadRangeButton.disabled = false;
+  analysisLoadFullButton.disabled = false;
+
+  analysisRaceSelect.value = entries.some(([id]) => id === previous)
+    ? previous
+    : entries[0][0];
+
+  analysisSetStatus(`${entries.length} Rennaufzeichnung${entries.length === 1 ? "" : "en"} gefunden.`, "success");
+  analysisOnRaceChange();
+}
+
+function analysisOnRaceChange() {
+  analysisCurrentRaceId = analysisRaceSelect.value;
+  analysisCurrentSamples = [];
+  analysisExportButton.disabled = true;
+  document.getElementById("sampleCount").textContent = "0 Datensätze";
+  analysisRenderCharts();
+  analysisRenderStats();
+
+  const meta = analysisRaces[analysisCurrentRaceId];
+  if (!meta) {
+    document.getElementById("raceInfo").textContent = "Noch kein Rennen ausgewählt.";
+    updateAnalysisDeleteButton();
+    return;
+  }
+
+  const start = Number(meta.startedAt || Date.now());
+  const stop = Number(meta.stoppedAt || Date.now());
+  analysisFromTime.value = analysisToLocalInputValue(start);
+  analysisToTime.value = analysisToLocalInputValue(stop);
+
+  const statusText = meta.stoppedAt
+    ? "Ende: " + analysisFormatDateTime(stop)
+    : "Aufzeichnung läuft / kein Endzeitpunkt gespeichert";
+
+  document.getElementById("raceInfo").innerHTML =
+    `<strong>${analysisEscapeHtml(meta.name || analysisCurrentRaceId)}</strong> · ` +
+    `Start: ${analysisFormatDateTime(start)} · ${statusText} · ` +
+    `Archivintervall: ${Number(meta.history_update_ms || 5000) / 1000} s · ` +
+    `ID: <code>${analysisEscapeHtml(analysisCurrentRaceId)}</code>`;
+
+  updateAnalysisDeleteButton();
+}
+
+function updateAnalysisDeleteButton() {
+  if (!analysisDeleteButton || !analysisRaceSelect) return;
+  const raceId = analysisRaceSelect.value;
+  const active = recordingState?.enabled === true && recordingState?.raceId === raceId;
+  analysisDeleteButton.disabled = !raceId || active;
+  analysisDeleteButton.title = active
+    ? "Eine laufende Aufzeichnung muss zuerst gestoppt werden."
+    : "Ausgewählte Rennaufzeichnung vollständig löschen";
+}
+
+async function analysisLoadFullRace() {
+  const meta = analysisRaces[analysisRaceSelect.value];
+  if (!meta) return;
+
+  const start = Number(meta.startedAt || 0);
+  const stop = Number(meta.stoppedAt || Date.now());
+  analysisFromTime.value = analysisToLocalInputValue(start);
+  analysisToTime.value = analysisToLocalInputValue(stop);
+  await analysisLoadRange(start, stop);
+}
+
+async function analysisLoadSelectedRange() {
+  const start = new Date(analysisFromTime.value).getTime();
+  const stop = new Date(analysisToTime.value).getTime();
+
+  if (!Number.isFinite(start) || !Number.isFinite(stop)) {
+    analysisSetStatus("Bitte gültigen Start- und Endzeitpunkt eingeben.", "error");
+    return;
+  }
+  if (stop <= start) {
+    analysisSetStatus("Der Endzeitpunkt muss nach dem Start liegen.", "error");
+    return;
+  }
+
+  await analysisLoadRange(start, stop);
+}
+
+async function analysisLoadRange(start, stop) {
+  const raceId = analysisRaceSelect.value;
+  if (!raceId) return;
+
+  analysisSetStatus("Historische Daten werden geladen…", "pending");
+  analysisLoadRangeButton.disabled = true;
+  analysisLoadFullButton.disabled = true;
+  analysisExportButton.disabled = true;
+
+  try {
+    const historyQuery = query(
+      ref(db, `tracker/history/${raceId}`),
+      orderByChild("timestamp"),
+      startAt(start),
+      endAt(stop)
+    );
+
+    const snapshot = await get(historyQuery);
+    const raw = snapshot.val() || {};
+
+    analysisCurrentSamples = Object.values(raw)
+      .filter(sample => sample && Number.isFinite(Number(sample.timestamp)))
+      .map(analysisNormalizeSample)
+      .sort((a, b) => a.timestamp - b.timestamp);
+
+    document.getElementById("sampleCount").textContent =
+      `${analysisCurrentSamples.length.toLocaleString("de-AT")} Datensätze`;
+
+    if (!analysisCurrentSamples.length) {
+      analysisSetStatus("Für diesen Zeitraum sind keine historischen Daten gespeichert.", "pending");
+      analysisRenderCharts();
+      analysisRenderStats();
+      return;
+    }
+
+    analysisSetStatus(
+      `${analysisCurrentSamples.length.toLocaleString("de-AT")} Datensätze geladen · ` +
+      `${analysisFormatDateTime(analysisCurrentSamples[0].timestamp)} bis ` +
+      `${analysisFormatDateTime(analysisCurrentSamples.at(-1).timestamp)}`,
+      "success"
+    );
+
+    analysisExportButton.disabled = false;
+    analysisRenderCharts();
+    analysisRenderStats();
+  } catch (error) {
+    analysisSetStatus("Historie konnte nicht geladen werden: " + error.message, "error");
+  } finally {
+    analysisLoadRangeButton.disabled = false;
+    analysisLoadFullButton.disabled = false;
+    updateAnalysisDeleteButton();
+  }
+}
+
+function analysisNormalizeSample(sample) {
+  const normalized = { timestamp: Number(sample.timestamp) };
+  for (const key of Object.keys(ANALYSIS_METRICS)) {
+    const n = Number(sample[key]);
+    normalized[key] = Number.isFinite(n) ? n : null;
+  }
+  return normalized;
+}
+
+function analysisSelectedMetrics(group) {
+  return [...document.querySelectorAll(".metric-toggle:checked")]
+    .map(cb => cb.value)
+    .filter(key => ANALYSIS_METRICS[key]?.group === group);
+}
+
+function analysisRenderCharts() {
+  if (typeof Chart === "undefined") return;
+  analysisRenderTemperatureChart();
+  analysisRenderOperatingChart();
+}
+
+function analysisRenderTemperatureChart() {
+  const canvas = document.getElementById("temperatureHistoryChart");
+  if (!canvas) return;
+  const selected = analysisSelectedMetrics("temperature");
+  const datasets = selected.map(key => {
+    const metric = ANALYSIS_METRICS[key];
+    return {
+      label: `${metric.label} (${metric.unit})`,
+      data: analysisCurrentSamples
+        .filter(s => s[key] != null)
+        .map(s => ({ x: s.timestamp, y: s[key] })),
+      borderColor: metric.color,
+      backgroundColor: metric.color,
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0.08,
+      spanGaps: false,
+      parsing: false
+    };
+  });
+
+  if (analysisTemperatureChart) analysisTemperatureChart.destroy();
+  analysisTemperatureChart = new Chart(canvas, {
+    type: "line",
+    data: { datasets },
+    options: analysisBaseChartOptions({
+      y: {
+        type: "linear",
+        position: "left",
+        title: { display: true, text: "Temperatur (°C)", color: "#bbb" },
+        ticks: { color: "#bbb" },
+        grid: { color: "#333" }
+      }
+    })
+  });
+}
+
+function analysisRenderOperatingChart() {
+  const canvas = document.getElementById("operatingHistoryChart");
+  if (!canvas) return;
+  const selected = analysisSelectedMetrics("operating");
+  const datasets = selected.map(key => {
+    const metric = ANALYSIS_METRICS[key];
+    return {
+      label: `${metric.label} (${metric.unit})`,
+      data: analysisCurrentSamples
+        .filter(s => s[key] != null)
+        .map(s => ({ x: s.timestamp, y: s[key] })),
+      borderColor: metric.color,
+      backgroundColor: metric.color,
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0.05,
+      spanGaps: false,
+      parsing: false,
+      yAxisID: metric.axis
+    };
+  });
+
+  if (analysisOperatingChart) analysisOperatingChart.destroy();
+  analysisOperatingChart = new Chart(canvas, {
+    type: "line",
+    data: { datasets },
+    options: analysisBaseChartOptions({
+      yPressure: analysisAxisOptions("Öldruck (bar)", "left", "#2e9bff"),
+      yRpm: analysisAxisOptions("Drehzahl (U/min)", "right", "#a04cff"),
+      ySpeed: analysisAxisOptions("Geschwindigkeit (km/h)", "right", "#43ff5f")
+    })
+  });
+}
+
+function analysisBaseChartOptions(yScales) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    normalized: true,
+    parsing: false,
+    interaction: { mode: "nearest", intersect: false },
+    plugins: {
+      legend: { labels: { color: "#ddd" } },
+      tooltip: {
+        callbacks: {
+          title(items) {
+            if (!items.length) return "";
+            return analysisFormatDateTime(items[0].parsed.x, true);
+          }
+        }
+      },
+      decimation: { enabled: true, algorithm: "lttb", samples: 1600 }
+    },
+    scales: {
+      x: {
+        type: "linear",
+        ticks: {
+          color: "#aaa",
+          maxTicksLimit: 10,
+          callback(value) { return analysisFormatAxisTime(value); }
+        },
+        grid: { color: "#2a2a2a" },
+        title: { display: true, text: "Zeit", color: "#bbb" }
+      },
+      ...yScales
+    }
+  };
+}
+
+function analysisAxisOptions(title, position, color) {
+  return {
+    type: "linear",
+    position,
+    display: "auto",
+    title: { display: true, text: title, color },
+    ticks: { color },
+    grid: { drawOnChartArea: position === "left", color: "#333" }
+  };
+}
+
+function analysisRenderStats() {
+  const container = document.getElementById("statsGrid");
+  if (!container) return;
+
+  if (!analysisCurrentSamples.length) {
+    container.innerHTML = '<div class="empty-history">Noch keine historischen Daten geladen.</div>';
+    return;
+  }
+
+  container.innerHTML = Object.entries(ANALYSIS_METRICS).map(([key, metric]) => {
+    const values = analysisCurrentSamples
+      .filter(s => s[key] != null)
+      .map(s => ({ timestamp: s.timestamp, value: s[key] }));
+
+    if (!values.length) {
+      return `<div class="stat-card"><div class="stat-title">${metric.label}</div><div class="stat-empty">Keine Daten</div></div>`;
+    }
+
+    const rawValues = values.map(v => v.value);
+    const min = Math.min(...rawValues);
+    const max = Math.max(...rawValues);
+    const avg = rawValues.reduce((sum, v) => sum + v, 0) / rawValues.length;
+    const maxPoint = values.reduce((best, p) => p.value > best.value ? p : best);
+    const thresholdText = analysisThresholdDurationText(key, values);
+
+    return `
+      <div class="stat-card">
+        <div class="stat-title">${metric.label}</div>
+        <div class="stat-row"><span>Minimum</span><strong>${analysisFormatMetric(min, metric)} ${metric.unit}</strong></div>
+        <div class="stat-row"><span>Maximum</span><strong>${analysisFormatMetric(max, metric)} ${metric.unit}</strong></div>
+        <div class="stat-row"><span>Durchschnitt</span><strong>${analysisFormatMetric(avg, metric)} ${metric.unit}</strong></div>
+        <div class="stat-row"><span>Maximum am</span><strong>${analysisFormatDateTime(maxPoint.timestamp)}</strong></div>
+        ${thresholdText}
+      </div>`;
+  }).join("");
+}
+
+function analysisThresholdDurationText(key, values) {
+  let warn = null;
+  let alarm = null;
+  let direction = "high";
+
+  if (key === "oil_temp") {
+    warn = analysisNumberOrNull(analysisSettings.oilTempWarn);
+    alarm = analysisNumberOrNull(analysisSettings.oilTempAlarm);
+  } else if (key === "cylinder_temp") {
+    warn = analysisNumberOrNull(analysisSettings.cylTempWarn);
+    alarm = analysisNumberOrNull(analysisSettings.cylTempAlarm);
+  } else if (key === "oil_pressure") {
+    warn = analysisNumberOrNull(analysisSettings.oilPressureWarn);
+    alarm = analysisNumberOrNull(analysisSettings.oilPressureAlarm);
+    direction = "low";
+  } else {
+    return '<div class="stat-row"><span>Grenzzeit</span><strong>—</strong></div>';
+  }
+
+  if (warn == null || alarm == null) {
+    return '<div class="stat-row"><span>Grenzzeit</span><strong>Grenzen fehlen</strong></div>';
+  }
+
+  const warnMs = analysisDurationBeyond(values, warn, direction);
+  const alarmMs = analysisDurationBeyond(values, alarm, direction);
+  return `
+    <div class="stat-row"><span>Warnbereich</span><strong>${analysisFormatDuration(warnMs)}</strong></div>
+    <div class="stat-row"><span>Alarmbereich</span><strong>${analysisFormatDuration(alarmMs)}</strong></div>`;
+}
+
+function analysisDurationBeyond(values, threshold, direction) {
+  if (values.length < 2) return 0;
+  const intervals = [];
+  for (let i = 1; i < values.length; i++) {
+    const dt = values[i].timestamp - values[i - 1].timestamp;
+    if (dt > 0 && dt < 60000) intervals.push(dt);
+  }
+  const sorted = [...intervals].sort((a, b) => a - b);
+  const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : 5000;
+  const maxGap = Math.max(15000, median * 3);
+  let total = 0;
+
+  for (let i = 0; i < values.length - 1; i++) {
+    const current = values[i];
+    const dt = values[i + 1].timestamp - current.timestamp;
+    if (dt <= 0 || dt > maxGap) continue;
+    const beyond = direction === "low"
+      ? current.value <= threshold
+      : current.value >= threshold;
+    if (beyond) total += dt;
+  }
+  return total;
+}
+
+async function deleteSelectedRace() {
+  const raceId = analysisRaceSelect?.value;
+  if (!raceId) return;
+
+  const meta = analysisRaces[raceId] || {};
+  const active = recordingState?.enabled === true && recordingState?.raceId === raceId;
+  if (active) {
+    alert("Diese Rennaufzeichnung läuft gerade. Bitte zuerst die Aufzeichnung stoppen.");
+    return;
+  }
+
+  const raceName = meta.name || raceId;
+  const confirmed = confirm(
+    `Rennaufzeichnung "${raceName}" wirklich endgültig löschen?\n\n` +
+    `Gelöscht werden:\n- Renninformationen\n- alle historischen Messwerte dieses Rennens\n\n` +
+    `Dieser Vorgang kann nicht rückgängig gemacht werden.`
+  );
+  if (!confirmed) return;
+
+  analysisDeleteButton.disabled = true;
+  analysisSetStatus(`Lösche "${raceName}" …`, "pending");
+
+  try {
+    const updates = {};
+    updates[`tracker/races/${raceId}`] = null;
+    updates[`tracker/history/${raceId}`] = null;
+
+    // Falls dies der zuletzt verwendete, aber bereits gestoppte Lauf war,
+    // werden auch die veralteten Verweise in der Recording-Konfiguration entfernt.
+    if (recordingState?.enabled !== true && recordingState?.raceId === raceId) {
+      updates["tracker/config/recording/raceId"] = null;
+      updates["tracker/config/recording/raceName"] = null;
+      updates["tracker/config/recording/stoppedAt"] = null;
+    }
+
+    await update(ref(db), updates);
+
+    if (analysisCurrentRaceId === raceId) {
+      analysisCurrentRaceId = "";
+      analysisCurrentSamples = [];
+      analysisExportButton.disabled = true;
+      document.getElementById("sampleCount").textContent = "0 Datensätze";
+      analysisRenderCharts();
+      analysisRenderStats();
+    }
+
+    analysisSetStatus(`Rennaufzeichnung "${raceName}" vollständig gelöscht.`, "success");
+  } catch (error) {
+    analysisSetStatus("Löschen fehlgeschlagen: " + error.message, "error");
+    alert("Rennaufzeichnung konnte nicht gelöscht werden: " + error.message);
+    updateAnalysisDeleteButton();
+  }
+}
+
+function analysisExportCsv() {
+  if (!analysisCurrentSamples.length) return;
+  const meta = analysisRaces[analysisRaceSelect.value] || {};
+  const header = [
+    "Zeitpunkt", "timestamp", "Zylinderkopftemperatur_C", "Motoroeltemperatur_C",
+    "Getriebeoeltemperatur_C", "Oeldruck_bar", "Drehzahl_Umin", "Geschwindigkeit_kmh"
+  ];
+  const rows = analysisCurrentSamples.map(s => [
+    analysisFormatDateTime(s.timestamp, true), s.timestamp,
+    analysisCsvNumber(s.cylinder_temp), analysisCsvNumber(s.oil_temp),
+    analysisCsvNumber(s.gear_oil_temp), analysisCsvNumber(s.oil_pressure),
+    analysisCsvNumber(s.rpm), analysisCsvNumber(s.speed_kmh)
+  ]);
+  const csv = "\ufeff" + [header, ...rows]
+    .map(row => row.map(analysisCsvEscape).join(";"))
+    .join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${analysisSafeFilename(meta.name || analysisRaceSelect.value || "MF35X_Rennen")}_Auswertung.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function analysisCsvNumber(value) {
+  return value == null ? "" : String(value).replace(".", ",");
+}
+
+function analysisCsvEscape(value) {
+  const text = String(value ?? "");
+  return /[;"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function analysisSafeFilename(text) {
+  return String(text).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim() || "MF35X_Rennen";
+}
+
+function analysisNumberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function analysisFormatMetric(value, metric) {
+  return Number(value).toLocaleString("de-AT", {
+    minimumFractionDigits: metric.decimals,
+    maximumFractionDigits: metric.decimals
+  });
+}
+
+function analysisFormatDuration(ms) {
+  if (!ms) return "0 min";
+  const totalMinutes = Math.round(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours ? `${hours} h ${minutes} min` : `${minutes} min`;
+}
+
+function analysisFormatDateTime(timestamp, seconds = false) {
+  if (!timestamp) return "---";
+  return new Date(Number(timestamp)).toLocaleString("de-AT", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit",
+    ...(seconds ? { second: "2-digit" } : {})
+  });
+}
+
+function analysisFormatAxisTime(timestamp) {
+  const d = new Date(Number(timestamp));
+  const p = n => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function analysisToLocalInputValue(timestamp) {
+  const d = new Date(Number(timestamp));
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function analysisSetStatus(text, state = "") {
+  const el = document.getElementById("analysisStatus");
+  if (!el) return;
+  el.textContent = text;
+  el.className = "config-status";
+  if (state) el.classList.add(`config-status-${state}`);
+}
+
+function analysisEscapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+  }[c]));
 }
 
 function readLiveNumber(value) {

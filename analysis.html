@@ -3,99 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MF35X Rennauswertung V9.5.1</title>
+  <title>MF35X Rennauswertung – nur Admin</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=9.5.1">
+  <link rel="stylesheet" href="style.css?v=9.5.6">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Rennauswertung</div>
-  <div class="version">Version 9.5.1 · Rennhistorie</div>
+  <div class="version">nur Admin</div>
 </header>
-
 <main>
-  <div class="analysis-nav">
-    <a class="button inline-button" href="index.html"><i class="fa-solid fa-arrow-left"></i> Live Tracker</a>
-    <a class="button inline-button" href="admin.html"><i class="fa-solid fa-gear"></i> Admin</a>
-  </div>
-
-  <section class="panel analysis-panel">
-    <div class="panel-header">
-      <h2>Rennen auswählen</h2>
-      <span id="analysisStatus" class="config-status">Lade Rennen…</span>
-    </div>
-
-    <div class="analysis-control-grid">
-      <label>
-        Rennen
-        <select id="raceSelect" class="analysis-select">
-          <option value="">Wird geladen…</option>
-        </select>
-      </label>
-      <label>
-        Zeitraum von
-        <input id="fromTime" type="datetime-local" step="1">
-      </label>
-      <label>
-        Zeitraum bis
-        <input id="toTime" type="datetime-local" step="1">
-      </label>
-    </div>
-
-    <div id="raceInfo" class="race-info">Noch kein Rennen ausgewählt.</div>
-
+  <section class="admin-box">
+    <h2><i class="fa-solid fa-lock"></i> Rennauswertung nur im Admin-Bereich</h2>
+    <p class="settings-note settings-note-block">
+      Rennaufzeichnungen und historische Messdaten werden in der Besucheransicht nicht mehr angezeigt.
+      Bitte über den Admin-Bereich anmelden.
+    </p>
     <div class="settings-actions">
-      <button id="loadRange" class="save-button">Zeitraum laden</button>
-      <button id="loadFullRace" class="reset-button">Gesamtes Rennen</button>
-      <button id="exportCsv" class="small-button" disabled><i class="fa-solid fa-file-csv"></i> CSV herunterladen</button>
+      <a class="button" href="admin.html#raceAnalysis"><i class="fa-solid fa-lock"></i> Zum Admin-Login</a>
+      <a class="button" href="index.html"><i class="fa-solid fa-arrow-left"></i> Zur Besucheransicht</a>
     </div>
   </section>
-
-  <section class="panel analysis-panel">
-    <h2>Messwerte</h2>
-    <div class="metric-toggle-grid">
-      <label><input type="checkbox" class="metric-toggle" value="cylinder_temp" checked> Zylinderkopftemperatur</label>
-      <label><input type="checkbox" class="metric-toggle" value="oil_temp" checked> Motoröltemperatur</label>
-      <label><input type="checkbox" class="metric-toggle" value="gear_oil_temp" checked> Getriebeöltemperatur</label>
-      <label><input type="checkbox" class="metric-toggle" value="oil_pressure"> Öldruck</label>
-      <label><input type="checkbox" class="metric-toggle" value="rpm"> Drehzahl</label>
-      <label><input type="checkbox" class="metric-toggle" value="speed_kmh"> Geschwindigkeit</label>
-    </div>
-  </section>
-
-  <section class="panel analysis-panel">
-    <div class="panel-header">
-      <h2>Temperaturverlauf</h2>
-      <span id="sampleCount" class="config-status">0 Datensätze</span>
-    </div>
-    <div class="history-chart-wrap">
-      <canvas id="temperatureHistoryChart"></canvas>
-    </div>
-  </section>
-
-  <details class="analysis-details">
-    <summary><i class="fa-solid fa-gauge-high"></i> Weitere Betriebsdaten anzeigen</summary>
-    <section class="panel analysis-panel analysis-inner-panel">
-      <div class="history-chart-wrap">
-        <canvas id="operatingHistoryChart"></canvas>
-      </div>
-    </section>
-  </details>
-
-  <section class="panel analysis-panel">
-    <h2>Statistik des geladenen Zeitraums</h2>
-    <div id="statsGrid" class="stats-grid">
-      <div class="empty-history">Noch keine historischen Daten geladen.</div>
-    </div>
-  </section>
-
-  <div class="footer">
-    Historische Daten werden erst angezeigt, sobald die spätere ESP32-Firmware Datensätze unter
-    <code>tracker/history/&lt;Renn-ID&gt;</code> speichert.
-  </div>
 </main>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
-<script type="module" src="analysis.js?v=9.5.1"></script>
 </body>
 </html>
