@@ -1,4 +1,4 @@
-/* MF35X Tracker V9.5.3 – stabile Offline-Erkennung ohne Werte-Flackern */
+/* MF35X Tracker V9.5.5 – GPS-Fix unabhängig von ESP32-Online-Status */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -55,6 +55,8 @@ L.tileLayer(
   }
 ).addTo(map);
 
+// Der Marker wird erst eingeblendet, wenn mindestens eine echte GPS-Position
+// vorhanden ist. Dadurch erscheint beim ersten Start keine erfundene Position.
 let marker = L.marker([48.2, 16.3], {
   icon: L.icon({
     iconUrl: "tractor.png",
@@ -62,7 +64,7 @@ let marker = L.marker([48.2, 16.3], {
     iconAnchor: [38, 38],
     className: "leaflet-custom-tractor"
   })
-}).addTo(map);
+});
 
 setupNotifications();
 
@@ -122,24 +124,19 @@ onValue(ref(db, "tracker/live"), s => {
     return;
   }
 
+  // Frischer Firebase-Zeitstempel bedeutet: ESP32 ist online.
+  // Ein fehlender GPS-Fix darf diesen Online-Status NICHT mehr überschreiben.
   currentLive = d;
-
-  if (d.lat === undefined || d.lng === undefined) {
-    offline("Keine GPS-Daten");
-    return;
-  }
-
-  let lat = Number(d.lat);
-  let lng = Number(d.lng);
-
-  if (isNaN(lat) || isNaN(lng)) {
-    offline("GPS ungültig");
-    return;
-  }
-
-  lastPos = { lat, lng };
   status("Online", 1);
   conn(d);
+
+  const gpsValid = d.gps_valid === true;
+  const lat = num(d.lat);
+  const lng = num(d.lng);
+  const positionAvailable =
+    lat != null && lng != null &&
+    lat >= -90 && lat <= 90 &&
+    lng >= -180 && lng <= 180;
 
   let speed = num(d.speed_kmh),
     bat = num(d.battery_v),
@@ -158,7 +155,7 @@ onValue(ref(db, "tracker/live"), s => {
   txt("oiltemp", ot != null ? Math.round(ot) : "---");
   txt("cyltemp", ct != null ? Math.round(ct) : "---");
 
-  gpsq(hd);
+  gpsq(hd, gpsValid);
   maxv({
     speed,
     rpm,
@@ -174,12 +171,30 @@ onValue(ref(db, "tracker/live"), s => {
   chart("oilTempChart", h.oilTemp, "°C");
   chart("cylTempChart", h.cylTemp, "°C");
 
-  marker.setLatLng([lat, lng]);
-  first ? (map.setView([lat, lng], 17), (first = false)) : map.panTo([lat, lng]);
+  // lat/lng koennen bei gps_valid=false absichtlich die letzte gueltige
+  // Position sein. Diese bleibt auf der Karte sichtbar, ohne einen aktuellen
+  // GPS-Fix vorzutäuschen.
+  if (positionAvailable) {
+    const positionChanged =
+      !lastPos || lastPos.lat !== lat || lastPos.lng !== lng;
 
-  let mb = document.getElementById("mapsButton");
-  mb.href = `https://www.google.com/maps?q=${lat},${lng}`;
-  mb.classList.remove("disabled");
+    lastPos = { lat, lng };
+
+    if (!map.hasLayer(marker)) {
+      marker.addTo(map);
+    }
+
+    marker.setLatLng([lat, lng]);
+
+    if (first) {
+      map.setView([lat, lng], 17);
+      first = false;
+    } else if (gpsValid && positionChanged) {
+      map.panTo([lat, lng]);
+    }
+  }
+
+  updateMapsButton(gpsValid);
 });
 
 /* Prüft viermal pro Sekunde, ob die letzten Daten wirklich zu alt sind. */
@@ -227,9 +242,16 @@ function conn(d) {
   );
 }
 
-function gpsq(hd) {
+function gpsq(hd, gpsValid) {
   let i = document.getElementById("gpsQualityIcon");
   i.classList.remove("green", "yellow", "red", "purple");
+
+  if (!gpsValid) {
+    txt("gpsQuality", "Kein Fix");
+    txt("hdop", "---");
+    i.classList.add("purple");
+    return;
+  }
 
   if (hd == null) {
     txt("gpsQuality", "---");
@@ -241,6 +263,23 @@ function gpsq(hd) {
   txt("hdop", hd.toFixed(1));
   txt("gpsQuality", hd <= 1.5 ? "Sehr gut" : hd <= 3 ? "Mittel" : "Schlecht");
   i.classList.add(hd <= 1.5 ? "green" : hd <= 3 ? "yellow" : "red");
+}
+
+function updateMapsButton(gpsValid) {
+  let mb = document.getElementById("mapsButton");
+
+  if (!lastPos) {
+    mb.href = "#";
+    mb.classList.add("disabled");
+    mb.innerHTML = '<i class="fa-solid fa-location-dot"></i> Noch keine GPS-Position';
+    return;
+  }
+
+  mb.href = `https://www.google.com/maps?q=${lastPos.lat},${lastPos.lng}`;
+  mb.classList.remove("disabled");
+  mb.innerHTML = gpsValid
+    ? '<i class="fa-solid fa-location-dot"></i> In Google Maps öffnen'
+    : '<i class="fa-solid fa-location-dot"></i> Letzte Position in Google Maps öffnen';
 }
 
 /*
@@ -282,15 +321,8 @@ function offline(t) {
   active.clear();
   oilPressureEngineStartAt = 0;
 
-  let mb = document.getElementById("mapsButton");
-
-  if (lastPos) {
-    mb.href = `https://www.google.com/maps?q=${lastPos.lat},${lastPos.lng}`;
-    mb.classList.remove("disabled");
-  } else {
-    mb.href = "#";
-    mb.classList.add("disabled");
-  }
+  // Auch bei echtem ESP32-Offline bleibt die letzte bekannte Position erhalten.
+  updateMapsButton(false);
 }
 
 function evaluateAlarms() {
