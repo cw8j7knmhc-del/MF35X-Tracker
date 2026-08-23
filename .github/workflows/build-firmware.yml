@@ -1,0 +1,141 @@
+name: Build signed MF35X firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'esp32/**'
+      - '.github/workflows/build-firmware.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mf35x-firmware-main
+  cancel-in-progress: false
+
+jobs:
+  build-sign-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile ESP32-S3 application
+        run: |
+          rm -rf build
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --output-dir build \
+            esp32/MF35X_Livetracker
+
+      - name: Check signing key secret
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          if [ -z "$OTA_SIGNING_KEY" ]; then
+            echo "GitHub secret OTA_SIGNING_KEY fehlt."
+            echo "Den privaten Schlüssel als Repository Secret hinterlegen."
+            exit 1
+          fi
+          printf '%s' "$OTA_SIGNING_KEY" > /tmp/mf35x_ota_private_key.pem
+          chmod 600 /tmp/mf35x_ota_private_key.pem
+
+      - name: Sign firmware and create manifest
+        env:
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          APP_BIN="$(find build -maxdepth 1 -type f -name '*.ino.bin' | head -n 1)"
+          if [ -z "$APP_BIN" ]; then
+            echo "Application .ino.bin nicht gefunden."
+            exit 1
+          fi
+
+          SIGN_TOOL="$HOME/.arduino15/packages/esp32/hardware/esp32/3.3.11/tools/bin_signing.py"
+          if [ ! -f "$SIGN_TOOL" ]; then
+            echo "bin_signing.py nicht gefunden: $SIGN_TOOL"
+            exit 1
+          fi
+
+          python3 -m pip install --quiet cryptography
+          mkdir -p firmware
+
+          python3 "$SIGN_TOOL" \
+            --bin "$APP_BIN" \
+            --key /tmp/mf35x_ota_private_key.pem \
+            --out firmware/MF35X_Livetracker_signed.bin \
+            --hash sha256
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, json, re
+          from datetime import datetime, timezone
+
+          version_header = Path('esp32/MF35X_Livetracker/firmware_version.h').read_text()
+          v = re.search(r'MF35X_FIRMWARE_VERSION\s+"([^"]+)"', version_header)
+          c = re.search(r'MF35X_FIRMWARE_VERSION_CODE\s+(\d+)', version_header)
+          if not v or not c:
+              raise SystemExit('Firmware-Version in firmware_version.h nicht gefunden')
+
+          binary = Path('firmware/MF35X_Livetracker_signed.bin')
+          data = binary.read_bytes()
+          manifest = {
+              'version': v.group(1),
+              'versionCode': int(c.group(1)),
+              'file': 'MF35X_Livetracker_signed.bin',
+              'size': len(data),
+              'md5': hashlib.md5(data).hexdigest(),
+              'sha256': hashlib.sha256(data).hexdigest(),
+              'signed': True,
+              'signature': 'RSA/SHA-256',
+              'publishedAt': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+          }
+          Path('firmware/manifest.json').write_text(
+              json.dumps(manifest, indent=2, ensure_ascii=False) + '\n'
+          )
+          PY
+
+          rm -f /tmp/mf35x_ota_private_key.pem
+
+      - name: Publish signed firmware to repository
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add firmware/MF35X_Livetracker_signed.bin firmware/manifest.json
+
+          if git diff --cached --quiet; then
+            echo "Firmware-Ausgabe unverändert."
+            exit 0
+          fi
+
+          VERSION="$(python3 - <<'PY'
+          import json
+          print(json.load(open('firmware/manifest.json'))['version'])
+          PY
+          )"
+
+          git commit -m "Build signed firmware ${VERSION} [skip ci]"
+          git push
