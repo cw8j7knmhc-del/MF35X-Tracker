@@ -29,7 +29,7 @@ const DEFAULT_INTERVALS = {
   rpm_firebase_update_ms: 250,
   oil_pressure_update_ms: 100,
   temperature_update_ms: 1000,
-  gps_update_ms: 1000,
+  gps_update_ms: 100,
   history_update_ms: 5000
 };
 

@@ -1,0 +1,52 @@
+MF35X TRACKER – GITHUB-UPLOAD FUER ERSTEN OTA-TEST V5.9.9
+==========================================================
+
+ZIEL
+- Auf dem ESP32 laeuft bereits V5.9.8 OTA SIGNED FIX2 per USB.
+- Dieses Paket stellt V5.9.9 fuer den ERSTEN kontrollierten Online-Test bereit.
+- V5.9.9 enthaelt KEINE neue Funktion. Nur Versionsnummer/-anzeige wurde von V5.9.8 auf V5.9.9 erhoeht.
+- GPS-, Firebase-, Sensor-, Ausgangs- und OTA-Logik des getesteten FIX2-Kerns bleiben unveraendert.
+
+WICHTIG: DIESES ZIP NICHT ALS ZIP-DATEI INS REPOSITORY LEGEN.
+Das ZIP zuerst am PC entpacken. Danach den INHALT dieses Ordners in die Wurzel des GitHub-Repositories MF35X-Tracker hochladen/ersetzen.
+
+REIHENFOLGE
+1. ZUERST GitHub Secret anlegen:
+   Repository -> Settings -> Secrets and variables -> Actions -> New repository secret
+   Name exakt: OTA_SIGNING_KEY
+   Wert: kompletter Inhalt der separat aufbewahrten Datei MF35X_OTA_PRIVATE_KEY_KEEP_SECRET.pem
+
+2. Danach den Inhalt dieses entpackten Uploadordners in das Repository hochladen.
+   Vorhandene Dateien mit gleichem Pfad ersetzen.
+
+3. GitHub Actions startet bei Aenderungen unter esp32/ automatisch.
+   Workflow: Build signed MF35X firmware
+   Verwendeter ESP32-Core: 3.3.11
+
+4. Warten, bis der Workflow gruen/erfolgreich ist.
+   Danach muessen automatisch entstehen/aktualisiert werden:
+   firmware/MF35X_Livetracker_signed.bin
+   firmware/manifest.json
+
+5. NOCH NICHT sofort auf 'Firmware aktualisieren' klicken.
+   Erst gemeinsam kontrollieren, dass manifest.json wirklich V5.9.9 / 50909 meldet und der Build erfolgreich war.
+
+SICHERHEIT
+- Der private PEM-Schluessel ist NICHT in diesem Paket enthalten.
+- secrets.h ist NICHT enthalten; nur secrets.example.h.
+- WLAN-Passwort ist NICHT im GitHub-Paket enthalten.
+- .gitignore blockiert secrets.h und *.pem.
+
+DATEIEN/ORDNER IM REPOSITORY
+.github/workflows/build-firmware.yml
+esp32/MF35X_Livetracker/MF35X_Livetracker.ino
+esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp
+esp32/MF35X_Livetracker/firmware_version.h
+esp32/MF35X_Livetracker/rollback_hook.cpp
+esp32/MF35X_Livetracker/build_opt.h
+esp32/MF35X_Livetracker/ota_public_key.h
+esp32/MF35X_Livetracker/secrets.example.h
+firmware/README.md
+admin.html
+admin.js
+.gitignore
