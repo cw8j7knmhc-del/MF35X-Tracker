@@ -1,0 +1,16 @@
+MF35X V5.9.9 – ERSTER OTA-TEST
+
+Basis: V5.9.8 OTA SIGNED FIX2 (USB-getestet)
+Aenderung: nur Versionsnummer und sichtbare Versionsbezeichnungen auf V5.9.9.
+Keine beabsichtigte Funktionsaenderung an GPS, Firebase, Sensorik, Drehzahl, Ausgang, Rennhistorie oder OTA-Mechanik.
+
+Admin-Website: V9.5.7
+Standard-GPS-Intervall in admin.js: 100 ms
+GitHub-Actions ESP32-Core: 3.3.11
+
+Vor OTA-Start pruefen:
+- GitHub Action erfolgreich
+- firmware/manifest.json: version V5.9.9
+- versionCode 50909
+- signed true
+- firmware/MF35X_Livetracker_signed.bin vorhanden

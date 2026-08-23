@@ -1,0 +1,4 @@
+#pragma once
+
+#define MF35X_FIRMWARE_VERSION "V5.9.9"
+#define MF35X_FIRMWARE_VERSION_CODE 50909UL
