@@ -3,14 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MF35X Admin V9.5.8</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>MF35X Admin V9.5.9</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-  <link rel="stylesheet" href="style.css?v=9.5.2">
+  <link rel="stylesheet" href="style.css?v=9.5.9">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.5.8</div>
+  <div class="version">Version 9.5.9</div>
 </header>
 
 <main>
@@ -19,7 +22,7 @@
   <input id="adminPassword" class="admin-input" type="password" placeholder="Passwort">
   <br><br>
   <button id="loginButton" class="save-button">Einloggen</button>
-  <p class="settings-note">Standardpasswort: mf35x. In admin.js änderbar.</p>
+  <p class="settings-note">Bitte Admin-Passwort eingeben.</p>
 </section>
 
 <section id="adminContent" class="hidden">
@@ -344,6 +347,10 @@
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
-<script type="module" src="admin.js?v=9.5.8"></script>
+<script type="module">
+  // Bei jedem Aufruf eine frische admin.js laden. Dadurch wird eine Änderung
+  // des Passworts nicht mehr durch eine alte Browser-/GitHub-Cachedatei verdeckt.
+  import(`./admin.js?v=9.5.9-${Date.now()}`);
+</script>
 </body>
 </html>
