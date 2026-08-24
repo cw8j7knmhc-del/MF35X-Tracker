@@ -3,7 +3,7 @@
 // =============================================================
 // BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFÜHRUNGSZEICHEN ÄNDERN
 // =============================================================
-const VISITOR_PASSWORD = "1234";
+const VISITOR_PASSWORD = "mf35x";
 
 const SESSION_KEY = "mf35x_visitor_access_v1";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
