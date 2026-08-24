@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>MF35X Live Tracker V9.5.7</title>
+  <title>MF35X Live Tracker V9.5.8</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
@@ -179,7 +179,7 @@
         <img src="tractor.png" class="title-tractor" alt="">
         MF35X Live Tracker
       </div>
-      <div class="version">Version 9.5.7 · Besucheransicht</div>
+      <div class="version">Version 9.5.8 · Besucheransicht</div>
     </header>
 
     <main>
@@ -333,6 +333,9 @@
     </main>
   </div>
 
-  <script type="module" src="visitor-login.js?v=9.5.7"></script>
+  <script type="module">
+    // Frische Passwortdatei laden, damit eine Änderung auf GitHub sofort gilt.
+    import(`./visitor-login.js?v=9.5.8-${Date.now()}`);
+  </script>
 </body>
 </html>

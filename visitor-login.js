@@ -1,8 +1,9 @@
-/* MF35X Besucher-Passwortschutz V9.5.7 */
+/* MF35X Besucher-Passwortschutz V9.5.8 – Passwort selbst änderbar */
 
-// SHA-256 des Besucherpassworts. Das Klartextpasswort steht nicht in der Datei.
-const VISITOR_PASSWORD_HASH =
-  "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+// =============================================================
+// BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFÜHRUNGSZEICHEN ÄNDERN
+// =============================================================
+const VISITOR_PASSWORD = "test";
 
 const SESSION_KEY = "mf35x_visitor_access_v1";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
@@ -25,9 +26,7 @@ loginForm.addEventListener("submit", async event => {
   loginButton.textContent = "Passwort wird geprüft...";
 
   try {
-    const enteredHash = await sha256(passwordInput.value);
-
-    if (enteredHash !== VISITOR_PASSWORD_HASH) {
+    if (passwordInput.value !== VISITOR_PASSWORD) {
       loginError.textContent = "Falsches Besucherpasswort.";
       passwordInput.value = "";
       passwordInput.focus();
@@ -95,15 +94,6 @@ function loadLeaflet() {
     script.onerror = () => reject(new Error("Leaflet konnte nicht geladen werden."));
     document.head.appendChild(script);
   });
-}
-
-async function sha256(value) {
-  const bytes = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-
-  return Array.from(new Uint8Array(digest))
-    .map(byte => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 function rememberAccess() {
