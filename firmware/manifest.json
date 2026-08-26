@@ -1,11 +1,11 @@
 {
-  "version": "V5.9.12",
-  "versionCode": 50912,
+  "version": "V5.9.13",
+  "versionCode": 50913,
   "file": "MF35X_Livetracker_signed.bin",
-  "size": 1149536,
-  "md5": "fcc98c1c98ada8be4e79eb2a286af948",
-  "sha256": "caf2a6fe4fab4c22b738f593d62f4b3ab0f028f6f04df7d18f5e73d6ab09761d",
+  "size": 1161472,
+  "md5": "a8d9a88c392197258f95cdfadceef81c",
+  "sha256": "68d75cf64c32c29be9589412cba5f72b558ced60ca6912ae42a2e3f2fdb7c2d0",
   "signed": true,
   "signature": "RSA/SHA-256",
-  "publishedAt": "2026-08-26T12:06:30.258763Z"
+  "publishedAt": "2026-08-26T12:51:03.184497Z"
 }
