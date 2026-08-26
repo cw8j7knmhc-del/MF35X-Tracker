@@ -27,10 +27,10 @@ let trackerStartPromise = null;
  * so wie vor Einbau des Besucherpassworts. Die eigentliche Besucheroberflaeche
  * bleibt trotzdem verborgen, bis das korrekte Passwort eingegeben wurde.
  *
- * Damit kann die bereits vorhandene Alarm-/Benachrichtigungslogik waehrend
- * derselben PWA-Sitzung weiterlaufen. Das ist bewusst KEIN echter Web-Push;
- * wenn iOS die PWA vollstaendig suspendiert/beendet, kann JavaScript nicht
- * garantiert weiterlaufen.
+ * Damit laufen die vorhandenen kostenlosen Browser-Benachrichtigungen sowie
+ * die ESP32-Online/Offline-Ueberwachung waehrend derselben Browser-/PWA-Sitzung
+ * weiter. Es werden dafuer keine Cloud Functions und kein kostenpflichtiger
+ * Firebase-Tarif verwendet.
  */
 startTrackerInBackground().catch(error => {
   console.error("Tracker-Hintergrundstart fehlgeschlagen:", error);
