@@ -1,0 +1,159 @@
+name: Apply V5.9.11 network-independent control task
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-v5911-control-task.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact V5.9.11 patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          core_path = Path('esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp')
+          ino_path = Path('esp32/MF35X_Livetracker/MF35X_Livetracker.ino')
+          version_path = Path('esp32/MF35X_Livetracker/firmware_version.h')
+
+          core = core_path.read_text()
+          ino = ino_path.read_text()
+          version = version_path.read_text()
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: erwartet genau 1 Treffer, gefunden {count}')
+              return text.replace(old, new, 1)
+
+          core = replace_once(
+              core,
+              '// MF35X LIVETRACKER V5.9.10 OTA SIGNED - GPS FIX REFERENZSTAND',
+              '// MF35X LIVETRACKER V5.9.11 OTA SIGNED - NETZUNABHAENGIGE GPIO11-STEUERUNG',
+              'Core-Kopfversion'
+          )
+
+          core = replace_once(
+              core,
+              'constexpr UBaseType_t GPS_TASK_PRIORITY = 3;\n',
+              '''constexpr UBaseType_t GPS_TASK_PRIORITY = 3;\n\n// V5.9.11: Zeitkritische W-Signal-/GPIO11-Steuerung laeuft in einem\n// eigenen FreeRTOS-Task und ist damit unabhaengig von WLAN, LTE, Firebase,\n// Website, HTTPS-Timeouts und Rennhistorie.\nconstexpr uint32_t CONTROL_TASK_STACK_SIZE = 3072;\nconstexpr UBaseType_t CONTROL_TASK_PRIORITY = 4;\nconstexpr TickType_t CONTROL_TASK_PERIOD_TICKS = pdMS_TO_TICKS(10);\nconstexpr BaseType_t CONTROL_TASK_CORE = 1;\n''',
+              'Control-Task-Konstanten'
+          )
+
+          core = replace_once(
+              core,
+              '''OutputConfig outputConfig = {\n  60.0f,\n  3200.0f,\n  3150.0f\n};\n''',
+              '''OutputConfig outputConfig = {\n  60.0f,\n  3200.0f,\n  3150.0f\n};\n\n// Schuetzt die drei zusammengehoerigen Ausgangsschwellen beim Wechsel\n// zwischen Firebase-/loop-Kontext und dem unabhaengigen Steuerungs-Task.\nportMUX_TYPE outputConfigMux = portMUX_INITIALIZER_UNLOCKED;\n''',
+              'OutputConfig-Mutex'
+          )
+
+          core = replace_once(
+              core,
+              'constexpr unsigned long RPM_SIGNAL_TIMEOUT_US = 1500000UL;',
+              'constexpr unsigned long RPM_SIGNAL_TIMEOUT_US = 500000UL;',
+              'W-Signal-Timeout'
+          )
+
+          core = replace_once(
+              core,
+              '''float rpmRoh = 0.0f;\nfloat rpm = 0.0f;\nbool rpmSignalOk = false;\nbool schaltausgangAktiv = false;\n\nunsigned long letzteRpmMessung = 0;\n''',
+              '''volatile float rpmRoh = 0.0f;\nvolatile float rpm = 0.0f;\nvolatile bool rpmSignalOk = false;\nvolatile bool schaltausgangAktiv = false;\nTaskHandle_t controlTaskHandle = nullptr;\n\nunsigned long letzteRpmMessung = 0;\n''',
+              'Control-State'
+          )
+
+          core = replace_once(
+              core,
+              '''void IRAM_ATTR rpmImpulsISR();\nvoid drehzahlAktualisieren();\nvoid schaltausgangAktualisieren();\nfloat widerstandZuBar(float widerstand);\n''',
+              '''void IRAM_ATTR rpmImpulsISR();\nvoid drehzahlAktualisieren();\nvoid schaltausgangAktualisieren();\nvoid steuerungTask(void* parameter);\nvoid steuerungTaskStarten();\nfloat widerstandZuBar(float widerstand);\n''',
+              'Control-Prototypen'
+          )
+
+          core = replace_once(
+              core,
+              '''  outputConfig.speedEnableKmh = (float)speed;\n  outputConfig.rpmOn = (float)rpmOn;\n  outputConfig.rpmOff = (float)rpmOff;\n  return true;\n}\n''',
+              '''  portENTER_CRITICAL(&outputConfigMux);\n  outputConfig.speedEnableKmh = (float)speed;\n  outputConfig.rpmOn = (float)rpmOn;\n  outputConfig.rpmOff = (float)rpmOff;\n  portEXIT_CRITICAL(&outputConfigMux);\n  return true;\n}\n''',
+              'Atomare OutputConfig-Uebernahme'
+          )
+
+          old_switch = '''void schaltausgangAktualisieren() {\n  // Die Geschwindigkeit ist NUR die Freigabe.\n  // Die Admin-Seite beschreibt "erreicht oder ueberschritten".\n  GpsSnapshot gpsDaten = gpsSnapshotLesen();\n\n  bool speedFreigabe =\n    gpsFixAktuell(gpsDaten) &&\n    gpsDaten.speedValid &&\n    gpsDaten.speedKmh >= outputConfig.speedEnableKmh;\n\n  // Fail-safe: ohne GPS-Freigabe oder ohne RPM-Signal immer LOW.\n  if (!speedFreigabe || !rpmSignalOk) {\n    schaltausgangAktiv = false;\n  } else {\n    if (!schaltausgangAktiv && rpm >= outputConfig.rpmOn) {\n      schaltausgangAktiv = true;\n    }\n\n    if (schaltausgangAktiv && rpm < outputConfig.rpmOff) {\n      schaltausgangAktiv = false;\n    }\n  }\n\n  digitalWrite(\n    SCHALTAUSGANG_PIN,\n    schaltausgangAktiv ? HIGH : LOW\n  );\n}\n'''
+
+          new_switch = '''void schaltausgangAktualisieren() {\n  // Die Geschwindigkeit ist NUR die Freigabe.\n  // Die Admin-Seite beschreibt "erreicht oder ueberschritten".\n  GpsSnapshot gpsDaten = gpsSnapshotLesen();\n\n  // Alle drei Grenzwerte als einen konsistenten Satz uebernehmen.\n  OutputConfig cfg;\n  portENTER_CRITICAL(&outputConfigMux);\n  cfg = outputConfig;\n  portEXIT_CRITICAL(&outputConfigMux);\n\n  bool speedFreigabe =\n    gpsFixAktuell(gpsDaten) &&\n    gpsDaten.speedValid &&\n    gpsDaten.speedKmh >= cfg.speedEnableKmh;\n\n  // Fail-safe: ohne GPS-Freigabe oder ohne RPM-Signal immer LOW.\n  if (!speedFreigabe || !rpmSignalOk) {\n    schaltausgangAktiv = false;\n  } else {\n    if (!schaltausgangAktiv && rpm >= cfg.rpmOn) {\n      schaltausgangAktiv = true;\n    }\n\n    if (schaltausgangAktiv && rpm < cfg.rpmOff) {\n      schaltausgangAktiv = false;\n    }\n  }\n\n  digitalWrite(\n    SCHALTAUSGANG_PIN,\n    schaltausgangAktiv ? HIGH : LOW\n  );\n}\n\n// V5.9.11: Dieser Task entkoppelt die komplette lokale Schaltentscheidung\n// vom Netzwerk. Auch waehrend blockierender HTTPS-/Firebase-Aufrufe werden\n// W-Signal, RPM, GPS-Freigabe, Hysterese und GPIO11 weiter bearbeitet.\nvoid steuerungTask(void* parameter) {\n  (void)parameter;\n  TickType_t letzterStart = xTaskGetTickCount();\n\n  for (;;) {\n    drehzahlAktualisieren();\n    schaltausgangAktualisieren();\n    vTaskDelayUntil(&letzterStart, CONTROL_TASK_PERIOD_TICKS);\n  }\n}\n\nvoid steuerungTaskStarten() {\n  if (controlTaskHandle != nullptr) return;\n\n  BaseType_t ergebnis = xTaskCreatePinnedToCore(\n    steuerungTask,\n    "MF35X_CTRL",\n    CONTROL_TASK_STACK_SIZE,\n    nullptr,\n    CONTROL_TASK_PRIORITY,\n    &controlTaskHandle,\n    CONTROL_TASK_CORE\n  );\n\n  if (ergebnis == pdPASS) {\n    Serial.println("Steuerungs-Task GPIO10/GPIO11: OK (netzunabhaengig)");\n  } else {\n    controlTaskHandle = nullptr;\n    digitalWrite(SCHALTAUSGANG_PIN, LOW);\n    schaltausgangAktiv = false;\n    Serial.println("WARNUNG: Steuerungs-Task konnte nicht gestartet werden - loop-Fallback aktiv.");\n  }\n}\n'''
+          core = replace_once(core, old_switch, new_switch, 'Control-Task-Funktionen')
+
+          core = replace_once(
+              core,
+              '''  // Ab jetzt wird GPS unabhaengig von HTTPS/Firebase permanent eingelesen.\n  gpsTaskStarten();\n\n  Wire.begin(I2C_SDA, I2C_SCL);\n''',
+              '''  // Ab jetzt wird GPS unabhaengig von HTTPS/Firebase permanent eingelesen.\n  gpsTaskStarten();\n\n  // V5.9.11: RPM/GPIO11 ebenfalls vor jedem WLAN-/Firebase-Zugriff starten.\n  // Damit bleibt die Schaltfunktion selbst bei komplettem Netzausfall lokal aktiv.\n  steuerungTaskStarten();\n\n  Wire.begin(I2C_SDA, I2C_SCL);\n''',
+              'Control-Task-Start'
+          )
+
+          core = replace_once(
+              core,
+              '  Serial.println("MF35X LIVETRACKER V5.9.10 OTA SIGNED");',
+              '  Serial.println("MF35X LIVETRACKER V5.9.11 OTA SIGNED");',
+              'Setup-Version'
+          )
+
+          core = replace_once(
+              core,
+              '''  gpsEinlesen();\n  drehzahlAktualisieren();\n  schaltausgangAktualisieren();\n\n  unsigned long jetzt = millis();\n''',
+              '''  gpsEinlesen();\n\n  // Normalfall: RPM/GPIO11 laufen ausschliesslich im eigenen Steuerungs-Task.\n  // Nur falls dessen Start fehlgeschlagen ist, bleibt die alte loop-Logik als\n  // sicherer Fallback erhalten.\n  if (controlTaskHandle == nullptr) {\n    drehzahlAktualisieren();\n    schaltausgangAktualisieren();\n  }\n\n  unsigned long jetzt = millis();\n''',
+              'loop-Entkopplung'
+          )
+
+          core = replace_once(
+              core,
+              '''  Serial.print("Drehzahl Rohwert: ");\n  Serial.print(rpmRoh, 0);\n  Serial.println(" U/min");\n\n  Serial.println("--- Externer High/Low-Ausgang ---");\n''',
+              '''  Serial.print("Drehzahl Rohwert: ");\n  Serial.print(rpmRoh, 0);\n  Serial.println(" U/min");\n  Serial.print("Steuerungs-Task GPIO10/GPIO11: ");\n  Serial.print(controlTaskHandle != nullptr ? "OK / NETZUNABHAENGIG" : "FALLBACK / LOOP");\n  Serial.print(" | W-Timeout: ");\n  Serial.print(RPM_SIGNAL_TIMEOUT_US / 1000UL);\n  Serial.println(" ms");\n\n  Serial.println("--- Externer High/Low-Ausgang ---");\n''',
+              'Status-Diagnose'
+          )
+
+          version = replace_once(
+              version,
+              '#define MF35X_FIRMWARE_VERSION "V5.9.10"\n#define MF35X_FIRMWARE_VERSION_CODE 50910UL',
+              '#define MF35X_FIRMWARE_VERSION "V5.9.11"\n#define MF35X_FIRMWARE_VERSION_CODE 50911UL',
+              'firmware_version.h'
+          )
+
+          ino = replace_once(
+              ino,
+              'MF35X Livetracker V5.9.10 OTA SIGNED - GPS FIX REFERENZSTAND',
+              'MF35X Livetracker V5.9.11 OTA SIGNED - NETZUNABHAENGIGE GPIO11-STEUERUNG',
+              'INO-Version'
+          )
+
+          core_path.write_text(core)
+          version_path.write_text(version)
+          ino_path.write_text(ino)
+          PY
+
+      - name: Verify scope and commit
+        run: |
+          set -euo pipefail
+          git diff --check
+          git diff -- esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp \
+                     esp32/MF35X_Livetracker/MF35X_Livetracker.ino \
+                     esp32/MF35X_Livetracker/firmware_version.h
+
+          rm .github/workflows/apply-v5911-control-task.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp \
+                  esp32/MF35X_Livetracker/MF35X_Livetracker.ino \
+                  esp32/MF35X_Livetracker/firmware_version.h \
+                  .github/workflows/apply-v5911-control-task.yml
+          git commit -m "V5.9.11: make RPM and GPIO11 network-independent"
+          git push origin main
