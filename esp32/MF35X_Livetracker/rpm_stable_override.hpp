@@ -1,19 +1,32 @@
 #pragma once
 
-// Stabilere W-Signal-Auswertung fuer V5.9.15.
-// Der bestehende Core bleibt als Fallback erhalten. Dieser Override ersetzt
-// im Normalfall nur den GPIO10/RPM/GPIO11-Steuerungs-Task.
+// Robuste W-Signal-Auswertung fuer V5.9.16.
+// Ziel: kurze Stoerflanken und unplausible Zwischenimpulse nicht als echte
+// Motordrehzahlandererung interpretieren. GPIO11 bleibt trotzdem schnell.
 
 constexpr uint32_t MF35X_RPM_MIN_PULSABSTAND_US = 500UL;
-constexpr uint8_t MF35X_RPM_PERIODEN_ANZAHL = 8;
+constexpr uint8_t MF35X_RPM_PERIODEN_ANZAHL = 21;
+constexpr uint8_t MF35X_RPM_MIN_PERIODEN = 7;
 constexpr unsigned long MF35X_RPM_BERECHNUNGSINTERVALL_MS = 50UL;
-constexpr float MF35X_RPM_ANZEIGE_ALPHA = 0.35f;
+constexpr float MF35X_RPM_ANZEIGE_ALPHA = 0.20f;
+
+// Nach dem Einlernen muss ein einzelner Pulsabstand innerhalb +/- 8 % der
+// laufend nachgefuehrten Referenz liegen. Reale Motordrehzahl kann sich von
+// einem Lichtmaschinenimpuls zum naechsten nicht sprunghaft um diesen Betrag
+// aendern; Stoerflanken koennen das sehr wohl.
+constexpr uint32_t MF35X_RPM_PLAUS_MIN_PROZENT = 92UL;
+constexpr uint32_t MF35X_RPM_PLAUS_MAX_PROZENT = 108UL;
+constexpr uint8_t MF35X_RPM_MAX_LUECKENFAKTOR = 4;
+constexpr uint8_t MF35X_RPM_NEUERFASSUNG_NACH_FEHLERN = 12;
 
 portMUX_TYPE mf35xRpmMux = portMUX_INITIALIZER_UNLOCKED;
 volatile uint32_t mf35xRpmLetzterImpulsUs = 0;
 volatile uint32_t mf35xRpmPeriodenUs[MF35X_RPM_PERIODEN_ANZAHL] = {};
 volatile uint8_t mf35xRpmPeriodenIndex = 0;
 volatile uint8_t mf35xRpmPeriodenCount = 0;
+volatile uint32_t mf35xRpmReferenzPeriodeUs = 0;
+volatile uint8_t mf35xRpmFehlerInFolge = 0;
+volatile uint32_t mf35xRpmVerworfeneImpulse = 0;
 volatile float mf35xRpmSchnell = 0.0f;
 
 unsigned long mf35xRpmLetzteBerechnungMs = 0;
@@ -25,38 +38,103 @@ void IRAM_ATTR mf35xStabileRpmISR() {
   portENTER_CRITICAL_ISR(&mf35xRpmMux);
 
   const uint32_t vorherUs = mf35xRpmLetzterImpulsUs;
+
+  // Erster Puls dient nur als Zeitanker.
+  if (vorherUs == 0) {
+    mf35xRpmLetzterImpulsUs = jetztUs;
+    letzterRpmImpulsUs = jetztUs;
+    rpmImpulse++;
+    portEXIT_CRITICAL_ISR(&mf35xRpmMux);
+    return;
+  }
+
   const uint32_t abstandUs = jetztUs - vorherUs;
+  uint32_t periodeUs = abstandUs;
+  bool gueltig = false;
 
-  // Offensichtliche Doppel-/Stoerflanken werden verworfen.
-  if (vorherUs == 0 || abstandUs >= MF35X_RPM_MIN_PULSABSTAND_US) {
-    if (vorherUs != 0) {
-      mf35xRpmPeriodenUs[mf35xRpmPeriodenIndex] = abstandUs;
-      mf35xRpmPeriodenIndex =
-        (uint8_t)((mf35xRpmPeriodenIndex + 1U) % MF35X_RPM_PERIODEN_ANZAHL);
+  if (abstandUs >= MF35X_RPM_MIN_PULSABSTAND_US) {
+    const uint32_t referenzUs = mf35xRpmReferenzPeriodeUs;
 
-      if (mf35xRpmPeriodenCount < MF35X_RPM_PERIODEN_ANZAHL) {
-        mf35xRpmPeriodenCount++;
+    if (referenzUs == 0) {
+      // Kurze Einlernphase nach Start / Neuerfassung.
+      gueltig = true;
+    } else {
+      const uint32_t minUs =
+        (referenzUs * MF35X_RPM_PLAUS_MIN_PROZENT) / 100UL;
+      const uint32_t maxUs =
+        (referenzUs * MF35X_RPM_PLAUS_MAX_PROZENT) / 100UL;
+
+      if (periodeUs >= minUs && periodeUs <= maxUs) {
+        gueltig = true;
+      } else if (periodeUs > maxUs) {
+        // Falls ein echter W-Puls einmal fehlt, ist der naechste Abstand etwa
+        // 2x, 3x ... so gross. Dann wird die Luecke auf eine Einzelperiode
+        // normiert statt faelschlich als Drehzahleinbruch gewertet.
+        for (uint8_t faktor = 2; faktor <= MF35X_RPM_MAX_LUECKENFAKTOR; faktor++) {
+          const uint32_t normiertUs = periodeUs / faktor;
+          if (normiertUs >= minUs && normiertUs <= maxUs) {
+            periodeUs = normiertUs;
+            gueltig = true;
+            break;
+          }
+        }
       }
+    }
+  }
+
+  if (gueltig) {
+    mf35xRpmPeriodenUs[mf35xRpmPeriodenIndex] = periodeUs;
+    mf35xRpmPeriodenIndex =
+      (uint8_t)((mf35xRpmPeriodenIndex + 1U) % MF35X_RPM_PERIODEN_ANZAHL);
+
+    if (mf35xRpmPeriodenCount < MF35X_RPM_PERIODEN_ANZAHL) {
+      mf35xRpmPeriodenCount++;
     }
 
     mf35xRpmLetzterImpulsUs = jetztUs;
+    mf35xRpmFehlerInFolge = 0;
 
-    // Bestehende Core-Variablen weiter pflegen, damit der alte
-    // 250-ms-Zaehler bei einem Task-Startfehler als Fallback nutzbar bleibt.
+    // Die Referenz wird bei jedem echten Puls nur sehr langsam nachgefuehrt.
+    // Dadurch folgt sie realer Beschleunigung, reagiert aber kaum auf einen
+    // einzelnen Randwert innerhalb des Plausibilitaetsfensters.
+    if (mf35xRpmReferenzPeriodeUs != 0) {
+      const int32_t differenz =
+        (int32_t)periodeUs - (int32_t)mf35xRpmReferenzPeriodeUs;
+      mf35xRpmReferenzPeriodeUs =
+        (uint32_t)((int32_t)mf35xRpmReferenzPeriodeUs + differenz / 16);
+    }
+
+    // Bestehende Core-Variablen fuer Status/Fallback weiter pflegen.
     rpmImpulse++;
     letzterRpmImpulsUs = jetztUs;
+  } else {
+    mf35xRpmVerworfeneImpulse++;
+
+    if (mf35xRpmFehlerInFolge < 255U) {
+      mf35xRpmFehlerInFolge++;
+    }
+
+    // Falls die echte Drehzahl / Signalform doch sehr stark gewechselt hat,
+    // nicht dauerhaft an einer alten Referenz festhalten. Nach mehreren
+    // aufeinanderfolgenden unplausiblen Flanken wird sauber neu eingelernt.
+    if (mf35xRpmFehlerInFolge >= MF35X_RPM_NEUERFASSUNG_NACH_FEHLERN) {
+      mf35xRpmReferenzPeriodeUs = 0;
+      mf35xRpmPeriodenIndex = 0;
+      mf35xRpmPeriodenCount = 0;
+      mf35xRpmFehlerInFolge = 0;
+      mf35xRpmLetzterImpulsUs = jetztUs;
+      letzterRpmImpulsUs = jetztUs;
+      rpmImpulse++;
+    }
   }
 
   portEXIT_CRITICAL_ISR(&mf35xRpmMux);
 }
 
-float mf35xRobusteMittlerePeriodeUs(
-  uint32_t* werte,
-  uint8_t anzahl
-) {
+float mf35xMedianPeriodeUs(uint32_t* werte, uint8_t anzahl) {
   if (anzahl == 0) return NAN;
 
-  // Kleine Sortierung; maximal acht Werte.
+  // Insertion-Sort ist fuer maximal 21 Werte klein und deterministisch.
   for (uint8_t i = 1; i < anzahl; i++) {
     const uint32_t key = werte[i];
     int j = (int)i - 1;
@@ -68,27 +146,13 @@ float mf35xRobusteMittlerePeriodeUs(
     werte[j + 1] = key;
   }
 
-  uint8_t start = 0;
-  uint8_t ende = anzahl;
-
-  // Ab fuenf Perioden jeweils den kleinsten und groessten Wert verwerfen.
-  // Dadurch beeinflusst ein einzelner kurzer Stoerimpuls oder eine einzelne
-  // lange Luecke die Drehzahl kaum noch.
-  if (anzahl >= 5) {
-    start = 1;
-    ende = (uint8_t)(anzahl - 1);
+  if ((anzahl & 1U) != 0U) {
+    return (float)werte[anzahl / 2U];
   }
 
-  uint64_t summe = 0;
-  uint8_t verwendet = 0;
-
-  for (uint8_t i = start; i < ende; i++) {
-    summe += werte[i];
-    verwendet++;
-  }
-
-  if (verwendet == 0) return NAN;
-  return (float)summe / (float)verwendet;
+  const uint32_t a = werte[(anzahl / 2U) - 1U];
+  const uint32_t b = werte[anzahl / 2U];
+  return ((float)a + (float)b) * 0.5f;
 }
 
 void mf35xStabileDrehzahlAktualisieren() {
@@ -107,10 +171,13 @@ void mf35xStabileDrehzahlAktualisieren() {
   uint32_t perioden[MF35X_RPM_PERIODEN_ANZAHL] = {};
   uint8_t anzahl = 0;
   uint32_t letzterImpulsUs = 0;
+  uint32_t referenzUs = 0;
 
   portENTER_CRITICAL(&mf35xRpmMux);
   anzahl = mf35xRpmPeriodenCount;
   letzterImpulsUs = mf35xRpmLetzterImpulsUs;
+  referenzUs = mf35xRpmReferenzPeriodeUs;
+
   for (uint8_t i = 0; i < anzahl; i++) {
     perioden[i] = mf35xRpmPeriodenUs[i];
   }
@@ -120,7 +187,7 @@ void mf35xStabileDrehzahlAktualisieren() {
 
   rpmSignalOk =
     letzterImpulsUs != 0 &&
-    anzahl >= 3 &&
+    anzahl >= MF35X_RPM_MIN_PERIODEN &&
     (uint32_t)(jetztUs - letzterImpulsUs) <= RPM_SIGNAL_TIMEOUT_US;
 
   if (!rpmSignalOk) {
@@ -131,10 +198,9 @@ void mf35xStabileDrehzahlAktualisieren() {
     return;
   }
 
-  const float mittlerePeriodeUs =
-    mf35xRobusteMittlerePeriodeUs(perioden, anzahl);
+  const float medianPeriodeUs = mf35xMedianPeriodeUs(perioden, anzahl);
 
-  if (!isfinite(mittlerePeriodeUs) || mittlerePeriodeUs <= 0.0f) {
+  if (!isfinite(medianPeriodeUs) || medianPeriodeUs <= 0.0f) {
     rpmSignalOk = false;
     rpmRoh = 0.0f;
     mf35xRpmSchnell = 0.0f;
@@ -143,17 +209,33 @@ void mf35xStabileDrehzahlAktualisieren() {
     return;
   }
 
-  // Gleiche Kalibrierlogik wie bisher, jetzt aber aus der gemessenen
-  // Pulsperiode statt aus einer groben Impulszahl pro 250-ms-Fenster.
-  const float frequenzHz = 1000000.0f / mittlerePeriodeUs;
+  // Nach der kurzen Startphase liefert der Median die erste robuste Referenz.
+  // Danach korrigiert er die ISR-Referenz langsam gegen langfristiges Driften.
+  const uint32_t medianUs = (uint32_t)(medianPeriodeUs + 0.5f);
+  portENTER_CRITICAL(&mf35xRpmMux);
+  if (mf35xRpmReferenzPeriodeUs == 0) {
+    mf35xRpmReferenzPeriodeUs = medianUs;
+  } else {
+    const int32_t differenz =
+      (int32_t)medianUs - (int32_t)mf35xRpmReferenzPeriodeUs;
+    mf35xRpmReferenzPeriodeUs =
+      (uint32_t)((int32_t)mf35xRpmReferenzPeriodeUs + differenz / 4);
+  }
+  referenzUs = mf35xRpmReferenzPeriodeUs;
+  portEXIT_CRITICAL(&mf35xRpmMux);
+
+  // Die schnelle Drehzahl basiert auf dem Median von bis zu 21 echten
+  // Pulsperioden. Bei ~3200 rpm umfasst das nur wenige 10 ms und bleibt daher
+  // schnell genug fuer GPIO11, ist aber gegen einzelne Ausreisser sehr robust.
+  const float frequenzHz = 1000000.0f / medianPeriodeUs;
   const float rohNeu = frequenzHz * 60.0f;
   const float schnellNeu = rohNeu * RPM_KALIBRIERFAKTOR;
 
   rpmRoh = rohNeu;
   mf35xRpmSchnell = schnellNeu;
 
-  // Nur der Anzeige-/Loggingwert wird leicht geglaettet.
-  // GPIO11 verwendet unten bewusst mf35xRpmSchnell und bleibt damit schnell.
+  // Website/Logging zusaetzlich sanft glatten. Der Schaltausgang verwendet
+  // bewusst mf35xRpmSchnell und damit NICHT diesen langsameren Anzeigewert.
   if (!mf35xRpmAnzeigeInitialisiert) {
     rpm = schnellNeu;
     mf35xRpmAnzeigeInitialisiert = true;
@@ -213,7 +295,7 @@ void mf35xAttachStableRpmInterrupt(int pin, int mode) {
   // ebenfalls im vorgesehenen netzunabhaengigen Task-Modus.
   BaseType_t ergebnis = xTaskCreatePinnedToCore(
     mf35xStabilerControlTask,
-    "MF35X_RPM_STABLE",
+    "MF35X_RPM_ROBUST",
     CONTROL_TASK_STACK_SIZE,
     nullptr,
     CONTROL_TASK_PRIORITY,
@@ -223,12 +305,12 @@ void mf35xAttachStableRpmInterrupt(int pin, int mode) {
 
   if (ergebnis == pdPASS) {
     Serial.println(
-      "Drehzahlfilter V5.9.15: Periodenmessung + 500-us-Stoerfilter + geglaettete Anzeige"
+      "Drehzahlfilter V5.9.16: Median-21 + adaptiver +/-8%-Plausibilitaetsfilter"
     );
   } else {
     controlTaskHandle = nullptr;
     Serial.println(
-      "WARNUNG: Stabiler RPM-Task konnte nicht gestartet werden - Core-Fallback wird verwendet."
+      "WARNUNG: Robuster RPM-Task konnte nicht gestartet werden - Core-Fallback wird verwendet."
     );
   }
 }
