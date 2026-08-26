@@ -107,6 +107,31 @@ onValue(ref(db, "tracker/live"), s => {
     return;
   }
 
+  const gpsValid = d.gps_valid === true;
+  const lat = num(d.lat);
+  const lng = num(d.lng);
+  const positionAvailable =
+    lat != null && lng != null &&
+    lat >= -90 && lat <= 90 &&
+    lng >= -180 && lng <= 180;
+
+  // Letzte bekannte Position immer zuerst uebernehmen.
+  // So bleibt sie auch sichtbar, wenn der ESP32 beim Oeffnen bereits offline ist.
+  if (positionAvailable) {
+    lastPos = { lat, lng };
+
+    if (!map.hasLayer(marker)) {
+      marker.addTo(map);
+    }
+
+    marker.setLatLng([lat, lng]);
+
+    if (first) {
+      map.setView([lat, lng], 17);
+      first = false;
+    }
+  }
+
   let ts = num(d.timestamp);
 
   if (ts == null) {
@@ -120,6 +145,7 @@ onValue(ref(db, "tracker/live"), s => {
 
   if (Date.now() - ts > liveTimeoutMs) {
     currentLive = null;
+    txt("lastUpdateSmall", new Date(ts).toLocaleTimeString("de-AT"));
     offline("Offline");
     return;
   }
@@ -129,14 +155,6 @@ onValue(ref(db, "tracker/live"), s => {
   currentLive = d;
   status("Online", 1);
   conn(d);
-
-  const gpsValid = d.gps_valid === true;
-  const lat = num(d.lat);
-  const lng = num(d.lng);
-  const positionAvailable =
-    lat != null && lng != null &&
-    lat >= -90 && lat <= 90 &&
-    lng >= -180 && lng <= 180;
 
   let speed = num(d.speed_kmh),
     bat = num(d.battery_v),
@@ -171,27 +189,9 @@ onValue(ref(db, "tracker/live"), s => {
   chart("oilTempChart", h.oilTemp, "°C");
   chart("cylTempChart", h.cylTemp, "°C");
 
-  // lat/lng koennen bei gps_valid=false absichtlich die letzte gueltige
-  // Position sein. Diese bleibt auf der Karte sichtbar, ohne einen aktuellen
-  // GPS-Fix vorzutäuschen.
-  if (positionAvailable) {
-    const positionChanged =
-      !lastPos || lastPos.lat !== lat || lastPos.lng !== lng;
-
-    lastPos = { lat, lng };
-
-    if (!map.hasLayer(marker)) {
-      marker.addTo(map);
-    }
-
-    marker.setLatLng([lat, lng]);
-
-    if (first) {
-      map.setView([lat, lng], 17);
-      first = false;
-    } else if (gpsValid && positionChanged) {
-      map.panTo([lat, lng]);
-    }
+  // Im Online-Betrieb folgt die Karte weiterhin neuen gueltigen GPS-Positionen.
+  if (positionAvailable && gpsValid) {
+    map.panTo([lat, lng]);
   }
 
   updateMapsButton(gpsValid);
