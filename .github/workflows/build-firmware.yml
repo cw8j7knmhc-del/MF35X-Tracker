@@ -46,6 +46,7 @@ jobs:
           mkdir -p build
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
             --output-dir build \
             esp32/MF35X_Livetracker
 
