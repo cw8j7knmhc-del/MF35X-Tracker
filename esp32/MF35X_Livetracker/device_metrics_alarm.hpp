@@ -39,6 +39,7 @@ struct DeviceMaxValues {
 
 DeviceMaxValues deviceMaxValues;
 bool deviceMaxDirty = false;
+bool deviceMaxNvsDirty = false;
 bool deviceMaxResetTimestampPending = false;
 bool deviceMaxFirebaseMerged = false;
 unsigned long deviceMaxLastPersistMs = 0;
@@ -105,6 +106,7 @@ uint32_t deviceAlarmDroppedCount = 0;
 uint32_t deviceAlarmCorruptCount = 0;
 uint16_t deviceAlarmActiveMask = 0;
 unsigned long deviceAlarmLastDrainAttemptMs = 0;
+unsigned long deviceAlarmDrainWaitMs = DEVICE_ALARM_DRAIN_OK_INTERVAL_MS;
 String deviceAlarmLastError = "";
 String deviceLastMaxResetCommandId = "";
 
@@ -128,11 +130,19 @@ void deviceMaxLaden() {
   deviceMaxValues.minBattery = preferences.getFloat("mn_bat", NAN);
 
   deviceAlarmSequence = preferences.getULong("alarm_seq", 0UL);
+  deviceAlarmActiveMask = (uint16_t)preferences.getUInt("alarm_mask", 0U);
   deviceLastMaxResetCommandId = preferences.getString("cmd_max", "");
+
+  if ((deviceMaxValues.validMask & DEVICE_MAX_SPEED_VALID) && !isfinite(deviceMaxValues.maxSpeed)) deviceMaxValues.validMask &= ~DEVICE_MAX_SPEED_VALID;
+  if ((deviceMaxValues.validMask & DEVICE_MAX_RPM_VALID) && !isfinite(deviceMaxValues.maxRpm)) deviceMaxValues.validMask &= ~DEVICE_MAX_RPM_VALID;
+  if ((deviceMaxValues.validMask & DEVICE_MAX_OIL_TEMP_VALID) && !isfinite(deviceMaxValues.maxOilTemp)) deviceMaxValues.validMask &= ~DEVICE_MAX_OIL_TEMP_VALID;
+  if ((deviceMaxValues.validMask & DEVICE_MAX_CYL_TEMP_VALID) && !isfinite(deviceMaxValues.maxCylTemp)) deviceMaxValues.validMask &= ~DEVICE_MAX_CYL_TEMP_VALID;
+  if ((deviceMaxValues.validMask & DEVICE_MIN_OIL_PRESSURE_VALID) && !isfinite(deviceMaxValues.minOilPressure)) deviceMaxValues.validMask &= ~DEVICE_MIN_OIL_PRESSURE_VALID;
+  if ((deviceMaxValues.validMask & DEVICE_MIN_BATTERY_VALID) && !isfinite(deviceMaxValues.minBattery)) deviceMaxValues.validMask &= ~DEVICE_MIN_BATTERY_VALID;
 }
 
 void deviceMaxSpeichern(bool force = false) {
-  if (!preferencesOk || !deviceMaxDirty) return;
+  if (!preferencesOk || !deviceMaxNvsDirty) return;
 
   const unsigned long now = millis();
   if (!force && (unsigned long)(now - deviceMaxLastPersistMs) < DEVICE_MAX_NVS_INTERVAL_MS) {
@@ -147,6 +157,7 @@ void deviceMaxSpeichern(bool force = false) {
   preferences.putFloat("mn_op", deviceMaxValues.minOilPressure);
   preferences.putFloat("mn_bat", deviceMaxValues.minBattery);
   deviceMaxLastPersistMs = now;
+  deviceMaxNvsDirty = false;
 }
 
 void deviceMaxWertSetzen(uint16_t bit, float& target, float value, bool maximum) {
@@ -159,6 +170,7 @@ void deviceMaxWertSetzen(uint16_t bit, float& target, float value, bool maximum)
   target = value;
   deviceMaxValues.validMask |= bit;
   deviceMaxDirty = true;
+  deviceMaxNvsDirty = true;
 }
 
 void deviceEngineStateAktualisieren() {
@@ -317,11 +329,13 @@ void deviceMaxUploadBearbeiten() {
 void deviceMaxReset() {
   deviceMaxValues = DeviceMaxValues{};
   deviceMaxDirty = true;
+  deviceMaxNvsDirty = true;
   deviceMaxResetTimestampPending = true;
   deviceMaxFirebaseMerged = true;
   deviceOilPressureEngineStartAt = 0;
   deviceMaxAktualisieren();
   deviceMaxSpeichern(true);
+  deviceMaxLastUploadAttemptMs = millis() - DEVICE_MAX_UPLOAD_RETRY_MS;
   deviceMaxUploadBearbeiten();
 }
 
@@ -698,6 +712,9 @@ void deviceAlarmAktualisieren() {
   );
 
   const uint16_t newlyActive = current & ~deviceAlarmActiveMask;
+  if (current != deviceAlarmActiveMask && preferencesOk) {
+    preferences.putUInt("alarm_mask", current);
+  }
   deviceAlarmActiveMask = current;
 
   if (newlyActive & DEVICE_ALARM_BAT_WARN) deviceAlarmEreignis(DEVICE_ALARM_KIND_BAT_WARN, batteryVoltage);
@@ -714,7 +731,7 @@ void deviceAlarmDrainBearbeiten() {
   if (!deviceAlarmQueueReady || deviceAlarmPendingCount == 0 || WiFi.status() != WL_CONNECTED) return;
 
   const unsigned long now = millis();
-  if ((unsigned long)(now - deviceAlarmLastDrainAttemptMs) < DEVICE_ALARM_DRAIN_OK_INTERVAL_MS) return;
+  if ((unsigned long)(now - deviceAlarmLastDrainAttemptMs) < deviceAlarmDrainWaitMs) return;
   deviceAlarmLastDrainAttemptMs = now;
 
   DeviceAlarmRecord rec;
@@ -725,10 +742,10 @@ void deviceAlarmDrainBearbeiten() {
   }
 
   if (!firebasePut(deviceAlarmFirebasePath(rec), deviceAlarmJson(rec))) {
-    deviceAlarmLastDrainAttemptMs = now +
-      (DEVICE_ALARM_DRAIN_ERROR_BACKOFF_MS - DEVICE_ALARM_DRAIN_OK_INTERVAL_MS);
+    deviceAlarmDrainWaitMs = DEVICE_ALARM_DRAIN_ERROR_BACKOFF_MS;
     return;
   }
+  deviceAlarmDrainWaitMs = DEVICE_ALARM_DRAIN_OK_INTERVAL_MS;
 
   if (!deviceAlarmAlsGesendetMarkieren(offset)) {
     deviceAlarmLastError = "Alarmqueue konnte nach Upload nicht bestaetigt werden";

@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.5.13 */
+/* MF35X Tracker Admin V9.5.14 */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get, update, query, orderByChild, startAt, endAt } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -75,6 +75,7 @@ let currentFirmwareVersionCode = 0;
 let latestOtaManifest = null;
 let pendingSystemCommand = null;
 let offlineHistoryPendingCount = 0;
+let maxValuesDeviceOwned = false;
 
 
 // ==================================================
@@ -206,7 +207,7 @@ function initAdmin() {
   document.getElementById("resetMaxValues").addEventListener("click", resetMaxValues);
 
   document.getElementById("clearAlarmHistory").addEventListener("click", async () => {
-    await set(ref(db, "tracker/alarmHistory"), []);
+    await set(ref(db, "tracker/alarmHistory"), null);
     alert("Alarmhistorie geleert.");
   });
 }
@@ -221,6 +222,7 @@ function listenSystemSupport() {
     otaPartitionReady = device.otaPartitionReady === true;
     currentFirmwareVersionCode = Number(device.firmwareVersionCode || 0);
     offlineHistoryPendingCount = Number(device.historyOfflinePending || 0);
+    maxValuesDeviceOwned = device.maxValuesDeviceOwned === true;
 
     const offlineBadge = document.getElementById("offlineBufferStatus");
     const offlineDetail = document.getElementById("offlineBufferDetail");
@@ -291,6 +293,7 @@ function listenSystemSupport() {
     }
 
     document.getElementById("restartEsp32").disabled = !systemCommandsSupported;
+    document.getElementById("resetMaxValues").disabled = !systemCommandsSupported || !maxValuesDeviceOwned;
     document.getElementById("restartWifi").disabled = !systemCommandsSupported;
     document.getElementById("restartGps").disabled =
       !systemCommandsSupported || !gpsSoftwareRestartSupported;
@@ -903,46 +906,18 @@ function createRaceId(timestamp) {
 }
 
 async function resetMaxValues() {
-  const button =
-    document.getElementById("resetMaxValues");
-
-  const originalText = button.innerText;
-
-  button.disabled = true;
-  button.innerText = "Wird zurückgesetzt...";
-
-  try {
-    const snapshot = await get(
-      ref(db, "tracker/live")
-    );
-
-    const live = snapshot.val() || {};
-
-    await set(
-      ref(db, "tracker/maxValues"),
-      {
-        maxSpeed: readLiveNumber(live.speed_kmh),
-        maxRpm: readLiveNumber(live.rpm),
-        maxOilTemp: readLiveNumber(live.oil_temp),
-        maxCylTemp: readLiveNumber(live.cylinder_temp),
-        minOilPressure: readLiveNumber(live.oil_pressure),
-        minBattery: readLiveNumber(live.battery_v),
-        resetAt: Date.now()
-      }
-    );
-
-    alert(
-      "Maximalwerte wurden auf die aktuellen Live-Werte zurückgesetzt."
-    );
-  } catch (error) {
-    alert(
-      "Fehler beim Zurücksetzen: " + error.message
-    );
-  } finally {
-    button.disabled = false;
-    button.innerText = originalText;
+  if (!systemCommandsSupported || !maxValuesDeviceOwned) {
+    alert("Maximalwerte werden erst ab der ESP32-Firmware V5.9.13 zentral vom Gerät verwaltet.");
+    return;
   }
+
+  await sendSystemCommand(
+    "max_values_reset",
+    "Maximalwerte zurücksetzen",
+    "Maximalwerte wirklich zurücksetzen? Der ESP32 beginnt danach sofort mit einer neuen Erfassung."
+  );
 }
+
 
 function listenMaxValues() {
   onValue(ref(db, "tracker/maxValues"), snapshot => {
@@ -994,24 +969,58 @@ function listenMaxValues() {
 
 function listenAlarmHistory() {
   onValue(ref(db, "tracker/alarmHistory"), snapshot => {
-    const history = snapshot.val() || [];
-    const container =
-      document.getElementById("alarmHistory");
+    const history = normalizeAdminAlarmHistory(snapshot.val());
+    const container = document.getElementById("alarmHistory");
 
     if (!history.length) {
-      container.innerHTML =
-        '<div class="empty-history">Noch keine Alarme.</div>';
+      container.innerHTML = '<div class="empty-history">Noch keine Alarme.</div>';
       return;
     }
 
     container.innerHTML = history.map(entry => `
       <div class="alarm-entry ${entry.level === "warning" ? "warning-entry" : ""}">
-        <div class="alarm-time">${entry.time}</div>
-        <div class="alarm-message">${entry.text}</div>
+        <div class="alarm-time">${formatAdminAlarmTime(entry)}</div>
+        <div class="alarm-message">${entry.text || "Alarm"}</div>
       </div>
     `).join("");
   });
 }
+
+function normalizeAdminAlarmHistory(raw) {
+  let history = [];
+  if (Array.isArray(raw)) {
+    history = raw.filter(Boolean);
+  } else if (raw && typeof raw === "object") {
+    history = Object.values(raw).filter(x => x && typeof x === "object");
+  }
+
+  return history
+    .map((entry, index) => ({ ...entry, __order: index }))
+    .sort((a, b) => {
+      const ta = Number(a.timestamp || 0);
+      const tb = Number(b.timestamp || 0);
+      if (tb !== ta) return tb - ta;
+      const sa = Number(a.sequence || 0);
+      const sb = Number(b.sequence || 0);
+      if (sb !== sa) return sb - sa;
+      return a.__order - b.__order;
+    })
+    .slice(0, 30);
+}
+
+function formatAdminAlarmTime(entry) {
+  const timestamp = Number(entry.timestamp || 0);
+  if (Number.isFinite(timestamp) && timestamp > 0) {
+    return new Date(timestamp).toLocaleString("de-AT");
+  }
+  if (entry.time) return entry.time;
+  const uptime = Number(entry.capturedUptimeMs);
+  if (Number.isFinite(uptime) && uptime >= 0) {
+    return `Uptime ${Math.round(uptime / 1000)} s`;
+  }
+  return "---";
+}
+
 
 
 // ==================================================

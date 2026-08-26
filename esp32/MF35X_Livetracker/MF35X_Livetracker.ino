@@ -1,5 +1,5 @@
 /*
-  MF35X Livetracker V5.9.12 OTA SIGNED - OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG
+  MF35X Livetracker V5.9.13 OTA SIGNED - OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG
 
   Diese .ino-Datei bleibt absichtlich minimal.
   Der eigentliche Tracker-Code liegt in MF35X_Livetracker_core.hpp.
