@@ -2,6 +2,7 @@
   MF35X Livetracker V5.9.15 OTA SIGNED
   - stabilisierte Drehzahlauswertung am W-Anschluss
   - schnelle GPIO11-Steuerung bleibt netzunabhaengig
+  - Build-Trigger fuer signiertes V5.9.15-OTA
 
   Diese .ino-Datei bleibt absichtlich minimal.
   Der eigentliche Tracker-Code liegt in MF35X_Livetracker_core.hpp.
