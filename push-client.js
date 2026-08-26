@@ -12,7 +12,8 @@ import {
 import { firebaseConfig } from "./firebase-config.js";
 import { MF35X_VAPID_PUBLIC_KEY } from "./push-config.js";
 
-const STORAGE_KEY = "mf35xNotificationsEnabled";
+const STORAGE_KEY = "mf35xPushEnabled";
+const LEGACY_NOTIFICATION_KEY = "mf35xNotificationsEnabled";
 const PUSH_APP_NAME = "mf35x-push-v960";
 const SW_URL = "./firebase-messaging-sw.js?v=9.6.0";
 const SW_SCOPE = "./";
@@ -36,6 +37,10 @@ initPush().catch(error => {
 
 async function initPush() {
   if (!button || !toggle || !status) return;
+
+  // Die alte V9.5.6 Browser-Notification darf parallel nicht mehr feuern.
+  // Der neue Push-Schalter verwendet deshalb bewusst einen eigenen Key.
+  localStorage.setItem(LEGACY_NOTIFICATION_KEY, "false");
 
   supported =
     "serviceWorker" in navigator &&
