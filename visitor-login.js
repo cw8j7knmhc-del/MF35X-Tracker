@@ -1,4 +1,4 @@
-/* MF35X Besucher-Passwortschutz V9.5.9 – Hintergrundueberwachung nach altem Verhalten */
+/* MF35X Besucher-Passwortschutz V9.5.10 – Login zuerst, optionale Statusueberwachung getrennt */
 
 // =============================================================
 // BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFUEHRUNGSZEICHEN AENDERN
@@ -6,9 +6,10 @@
 const VISITOR_PASSWORD = "mf35x";
 
 const SESSION_KEY = "mf35x_visitor_access_v1";
+const STATUS_NOTIFICATION_STORAGE_KEY = "mf35xEsp32StatusNotificationsEnabled";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
 const TRACKER_SCRIPT_URL = "./script.js?v=9.5.6";
-const ESP32_STATUS_NOTIFICATION_SCRIPT_URL = "./esp32-status-notifications.js?v=9.5.14";
+const ESP32_STATUS_NOTIFICATION_SCRIPT_URL = "./esp32-status-notifications.js?v=9.5.15";
 
 const loginSection = document.getElementById("visitorLogin");
 const loginForm = document.getElementById("visitorLoginForm");
@@ -20,20 +21,18 @@ const logoutButton = document.getElementById("visitorLogout");
 
 let trackerStarted = false;
 let trackerStartPromise = null;
+let statusMonitorStarted = false;
+let statusMonitorStartPromise = null;
 
 /*
- * WICHTIG:
- * Die Tracker-/Firebase-Logik wird wieder sofort beim Start der PWA geladen,
- * so wie vor Einbau des Besucherpassworts. Die eigentliche Besucheroberflaeche
- * bleibt trotzdem verborgen, bis das korrekte Passwort eingegeben wurde.
- *
- * Die ESP32-Online/Offline-Einstellung selbst ist ausschliesslich im Admin-Bereich
- * sichtbar und bedienbar. Wenn sie dort auf diesem Browser/PWA aktiviert wurde,
- * laeuft die Statusueberwachung hier unsichtbar weiter, damit beim Wechsel in die
- * Besucheransicht weiterhin Online-/Offline-Benachrichtigungen kommen koennen.
+ * Besucher ohne Freigabe laden bewusst KEINE komplette Tracker-/Firebase-Logik.
+ * Nur wenn die ESP32-Online/Offline-Benachrichtigung auf genau diesem Browser/PWA
+ * vorher im Adminbereich aktiviert wurde, darf der kleine Statusmonitor bereits
+ * vor dem Besucherlogin laufen. Dadurch bleibt die gewuenschte Admin-Funktion
+ * erhalten, ohne normale Besucher mit der kompletten Liveansicht zu verbinden.
  */
-startTrackerInBackground().catch(error => {
-  console.error("Tracker-Hintergrundstart fehlgeschlagen:", error);
+startStatusMonitorIfEnabled().catch(error => {
+  console.error("ESP32-Statusmonitor konnte nicht gestartet werden:", error);
 });
 
 loginForm.addEventListener("submit", async event => {
@@ -84,7 +83,7 @@ async function startTrackerInBackground() {
   trackerStartPromise = (async () => {
     await loadLeaflet();
     await import(`${TRACKER_SCRIPT_URL}-${Date.now()}`);
-    await import(`${ESP32_STATUS_NOTIFICATION_SCRIPT_URL}-${Date.now()}`);
+    await startStatusMonitorIfEnabled();
     trackerStarted = true;
   })();
 
@@ -92,6 +91,35 @@ async function startTrackerInBackground() {
     await trackerStartPromise;
   } finally {
     trackerStartPromise = null;
+  }
+}
+
+async function startStatusMonitorIfEnabled() {
+  if (!shouldRunStatusMonitor()) return;
+  if (statusMonitorStarted) return;
+  if (statusMonitorStartPromise) return statusMonitorStartPromise;
+
+  statusMonitorStartPromise = import(ESP32_STATUS_NOTIFICATION_SCRIPT_URL)
+    .then(() => {
+      statusMonitorStarted = true;
+    });
+
+  try {
+    await statusMonitorStartPromise;
+  } finally {
+    statusMonitorStartPromise = null;
+  }
+}
+
+function shouldRunStatusMonitor() {
+  try {
+    return (
+      "Notification" in window &&
+      Notification.permission === "granted" &&
+      localStorage.getItem(STATUS_NOTIFICATION_STORAGE_KEY) === "true"
+    );
+  } catch (error) {
+    return false;
   }
 }
 
@@ -105,8 +133,8 @@ async function openVisitorApp() {
     loginSection.hidden = true;
     visitorApp.hidden = false;
 
-    // Leaflet wurde eventuell initialisiert, waehrend die Karte verborgen war.
-    // Ein Resize nach dem Einblenden sorgt dafuer, dass die Karte korrekt zeichnet.
+    // Leaflet wird erst nach erfolgreicher Freigabe geladen. Ein Resize nach dem
+    // Einblenden sorgt trotzdem dafuer, dass die Karte korrekt zeichnet.
     requestAnimationFrame(() => {
       window.dispatchEvent(new Event("resize"));
       setTimeout(() => window.dispatchEvent(new Event("resize")), 250);
