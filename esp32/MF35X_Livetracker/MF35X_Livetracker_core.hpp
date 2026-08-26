@@ -309,7 +309,7 @@ RecordingConfig recordingConfig = {
 
 // Muss einmal am Fahrzeug kalibriert werden.
 // Formel: echte RPM / angezeigte Roh-RPM
-constexpr float RPM_KALIBRIERFAKTOR = 1.0000f;
+constexpr float RPM_KALIBRIERFAKTOR = 0.06512f;
 
 // Interne Drehzahlberechnung. Unabhaengig vom Firebase-Upload.
 constexpr unsigned long RPM_MESSINTERVALL_MS = 250UL;
