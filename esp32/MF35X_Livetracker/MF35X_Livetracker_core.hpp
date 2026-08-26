@@ -16,7 +16,7 @@
 #include <freertos/semphr.h>
 
 // ==================================================
-// MF35X LIVETRACKER V5.9.11 OTA SIGNED - NETZUNABHAENGIGE GPIO11-STEUERUNG
+// MF35X LIVETRACKER V5.9.12 OTA SIGNED - OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG
 // GPS + OELTEMP + OELDRUCK + BATTERIE + ZYLINDERTEMP
 // + DREHZAHL + SCHALTAUSGANG + FIREBASE-KONFIGURATION
 // + DYNAMISCHE UPDATEINTERVALLE + RENNHISTORIE
@@ -206,6 +206,11 @@ struct GpsSnapshot {
 
   bool satellitesValid;
   uint32_t satellites;
+
+  // V5.9.12: GPS-UTC wird fuer netzunabhaengige Renn-Zeitstempel genutzt.
+  bool utcValid;
+  uint64_t utcEpochMs;
+  unsigned long utcUpdateMillis;
 
   uint32_t charsProcessed;
   uint32_t passedChecksum;
@@ -456,6 +461,7 @@ String firebaseUrl(const String& pfad);
 bool firebaseGet(const String& pfad, String& antwort);
 bool firebasePatch(const String& pfad, const String& json, bool alsLiveUpload);
 bool firebasePost(const String& pfad, const String& json);
+bool firebasePut(const String& pfad, const String& json);
 bool outputConfigUebernehmen(const String& configJson);
 bool intervalConfigUebernehmen(const String& configJson);
 bool recordingConfigUebernehmen(const String& configJson);
@@ -754,6 +760,18 @@ void lokaleKonfigurationLaden() {
   intervalConfig.gpsUpdateMs = preferences.getULong("gint", intervalConfig.gpsUpdateMs);
   intervalConfig.historyUpdateMs = preferences.getULong("hint", intervalConfig.historyUpdateMs);
 
+  // V5.9.12: Laufende Rennaufzeichnung ebenfalls lokal merken. Dadurch kann
+  // nach einem Stromausfall auch ohne sofortige Firebase-Verbindung weiter
+  // aufgezeichnet und in den Offline-Puffer geschrieben werden.
+  recordingConfig.enabled = preferences.getBool("rec_en", false);
+  recordingConfig.raceId = preferences.getString("rec_id", "");
+  recordingConfig.raceName = preferences.getString("rec_name", "");
+  recordingConfig.historyUpdateMs = preferences.getULong("rec_int", intervalConfig.historyUpdateMs);
+  if (recordingConfig.raceId.length() == 0) recordingConfig.enabled = false;
+  if (recordingConfig.historyUpdateMs < 1000UL || recordingConfig.historyUpdateMs > 60000UL) {
+    recordingConfig.historyUpdateMs = intervalConfig.historyUpdateMs;
+  }
+
   alarmConfig.batteryWarn = preferences.getFloat("bw", alarmConfig.batteryWarn);
   alarmConfig.batteryAlarm = preferences.getFloat("ba", alarmConfig.batteryAlarm);
   alarmConfig.oilPressureWarn = preferences.getFloat("opw", alarmConfig.oilPressureWarn);
@@ -808,6 +826,11 @@ void lokaleKonfigurationSpeichern() {
   preferences.putULong("tint", intervalConfig.temperatureUpdateMs);
   preferences.putULong("gint", intervalConfig.gpsUpdateMs);
   preferences.putULong("hint", intervalConfig.historyUpdateMs);
+
+  preferences.putBool("rec_en", recordingConfig.enabled);
+  preferences.putString("rec_id", recordingConfig.raceId);
+  preferences.putString("rec_name", recordingConfig.raceName);
+  preferences.putULong("rec_int", recordingConfig.historyUpdateMs);
 
   preferences.putFloat("bw", alarmConfig.batteryWarn);
   preferences.putFloat("ba", alarmConfig.batteryAlarm);
@@ -920,6 +943,32 @@ bool firebasePost(const String& pfad, const String& json) {
   int code = http.POST(json);
   letzterHttpCode = code;
 
+  bool ok = (code == 200);
+  http.end();
+  gpsEinlesen();
+  return ok;
+}
+
+// V5.9.12: Deterministischer PUT fuer Rennsamples. Derselbe Messpunkt kann
+// nach einem Timeout gefahrlos erneut gesendet werden, ohne Duplikate zu erzeugen.
+bool firebasePut(const String& pfad, const String& json) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  http.setTimeout(4000);
+
+  String url = firebaseUrl(pfad);
+  if (!http.begin(client, url)) {
+    letzterHttpCode = -1;
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  int code = http.PUT(json);
+  letzterHttpCode = code;
   bool ok = (code == 200);
   http.end();
   gpsEinlesen();
@@ -1057,6 +1106,7 @@ void firebaseKonfigurationLaden(bool statusMelden) {
   OutputConfig outputVorher = outputConfig;
   IntervalConfig intervalVorher = intervalConfig;
   AlarmConfig alarmVorher = alarmConfig;
+  RecordingConfig recordingVorher = recordingConfig;
 
   String configJson;
   String settingsJson;
@@ -1087,6 +1137,10 @@ void firebaseKonfigurationLaden(bool statusMelden) {
     intervalVorher.temperatureUpdateMs != intervalConfig.temperatureUpdateMs ||
     intervalVorher.gpsUpdateMs != intervalConfig.gpsUpdateMs ||
     intervalVorher.historyUpdateMs != intervalConfig.historyUpdateMs ||
+    recordingVorher.enabled != recordingConfig.enabled ||
+    recordingVorher.raceId != recordingConfig.raceId ||
+    recordingVorher.raceName != recordingConfig.raceName ||
+    recordingVorher.historyUpdateMs != recordingConfig.historyUpdateMs ||
     floatAnders(alarmVorher.batteryWarn, alarmConfig.batteryWarn) ||
     floatAnders(alarmVorher.batteryAlarm, alarmConfig.batteryAlarm) ||
     floatAnders(alarmVorher.oilPressureWarn, alarmConfig.oilPressureWarn) ||
@@ -1525,6 +1579,32 @@ void gpsRmcRateAktualisieren() {
   gpsRmcMessungLetzteMs = jetzt;
 }
 
+// UTC-Konvertierung ohne lokale Zeitzone. Grundlage ist die GPS-Zeit aus RMC.
+int64_t gpsTageSeitUnixEpoch(int jahr, unsigned monat, unsigned tag) {
+  jahr -= monat <= 2;
+  const int era = (jahr >= 0 ? jahr : jahr - 399) / 400;
+  const unsigned yoe = (unsigned)(jahr - era * 400);
+  const unsigned doy = (153 * (monat + (monat > 2 ? -3 : 9)) + 2) / 5 + tag - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return (int64_t)era * 146097 + (int64_t)doe - 719468;
+}
+
+uint64_t gpsUtcEpochMsBerechnen() {
+  const int jahr = gps.date.year();
+  const unsigned monat = gps.date.month();
+  const unsigned tag = gps.date.day();
+  if (jahr < 2020 || monat < 1 || monat > 12 || tag < 1 || tag > 31) return 0;
+
+  const int64_t tage = gpsTageSeitUnixEpoch(jahr, monat, tag);
+  if (tage < 0) return 0;
+
+  uint64_t sekunden = (uint64_t)tage * 86400ULL;
+  sekunden += (uint64_t)gps.time.hour() * 3600ULL;
+  sekunden += (uint64_t)gps.time.minute() * 60ULL;
+  sekunden += (uint64_t)gps.time.second();
+  return sekunden * 1000ULL + (uint64_t)gps.time.centisecond() * 10ULL;
+}
+
 void gpsParserSnapshotAktualisieren() {
   GpsSnapshot neu = gpsSnapshotLesen();
 
@@ -1561,6 +1641,22 @@ void gpsParserSnapshotAktualisieren() {
     neu.satellites = gps.satellites.value();
   } else {
     neu.satellites = 0;
+  }
+
+  // RMC liefert Datum + UTC-Zeit unabhaengig von LTE/Firebase.
+  if (gps.date.isValid() && gps.time.isValid()) {
+    const unsigned long dateAge = gps.date.age();
+    const unsigned long timeAge = gps.time.age();
+    if (dateAge != ULONG_MAX && timeAge != ULONG_MAX &&
+        dateAge <= 2000UL && timeAge <= 2000UL) {
+      const uint64_t epoch = gpsUtcEpochMsBerechnen();
+      if (epoch > 1700000000000ULL) {
+        neu.utcValid = true;
+        neu.utcEpochMs = epoch;
+        const unsigned long age = dateAge > timeAge ? dateAge : timeAge;
+        neu.utcUpdateMillis = millis() - age;
+      }
+    }
   }
 
   neu.charsProcessed = gps.charsProcessed();
@@ -2073,6 +2169,9 @@ String historyJsonBauen() {
   return json;
 }
 
+// V5.9.12: Durable Offline-Warteschlange fuer Rennmesspunkte.
+#include "offline_race_buffer.hpp"
+
 // ==================================================
 // DYNAMISCHE LIVE-UPLOADS
 // ==================================================
@@ -2124,22 +2223,11 @@ void rennhistorieBearbeiten() {
   }
 
   if (!zeitFaellig(jetzt, letzterHistoryUpload, intervall)) return;
-
   letzterHistoryUpload = jetzt;
 
-  if (WiFi.status() != WL_CONNECTED) return;
-
-  String pfad = "tracker/races/";
-  pfad += recordingConfig.raceId;
-  pfad += "/samples";
-
-  String json = historyJsonBauen();
-
-  if (firebasePost(pfad, json)) {
-    historyOk++;
-  } else {
-    historyFehler++;
-  }
+  // V5.9.12: Immer einen Messpunkt erzeugen - auch ohne WLAN.
+  // Versand bzw. dauerhafte Pufferung entscheidet die Offline-Queue.
+  offlineRennMesspunktBearbeiten();
 }
 
 // ==================================================
@@ -2588,6 +2676,22 @@ void deviceStatusSenden() {
   jsonBoolFeld(json, first, "otaPendingValidation", otaIstPendingVerify());
   jsonText(json, first, "otaManifestUrl", OTA_MANIFEST_URL);
   jsonBoolFeld(json, first, "historySupported", true);
+  jsonBoolFeld(json, first, "historyOfflineBufferSupported", true);
+  jsonBoolFeld(json, first, "historyOfflineBufferReady", offlineBufferReady);
+  jsonBoolFeld(json, first, "historyOfflineBufferFull", offlineBufferFull);
+  jsonULongFeld(json, first, "historyOfflinePending", offlinePendingCount);
+  jsonULongFeld(json, first, "historyOfflineQueued", offlineQueuedCount);
+  jsonULongFeld(json, first, "historyOfflineReplayed", offlineReplayedCount);
+  jsonULongFeld(json, first, "historyOfflineDropped", offlineDroppedCount);
+  jsonULongFeld(json, first, "historyOfflineCorrupt", offlineCorruptCount);
+  jsonULongFeld(json, first, "historyOfflineFsTotalBytes", (unsigned long)offlineFsTotalBytes);
+  jsonULongFeld(json, first, "historyOfflineFsUsedBytes", (unsigned long)offlineFsUsedBytes);
+  jsonBoolFeld(json, first, "historyOfflinePsramAvailable", offlinePsramAvailable);
+  jsonULongFeld(json, first, "historyOfflinePsramBytes", (unsigned long)offlinePsramBytes);
+  jsonULongFeld(json, first, "historyOfflinePsramCacheRecords", (unsigned long)offlinePsramCacheCount);
+  if (offlineLastError.length() > 0) {
+    jsonText(json, first, "historyOfflineLastError", offlineLastError);
+  }
   jsonBoolFeld(json, first, "systemCommandsSupported", true);
   jsonBoolFeld(json, first, "gpsSoftwareRestartSupported", true);
   jsonBoolFeld(json, first, "gpsParallelRxSupported", true);
@@ -2619,7 +2723,7 @@ void setup() {
 
   Serial.println();
   Serial.println("============================================");
-  Serial.println("MF35X LIVETRACKER V5.9.11 OTA SIGNED");
+  Serial.println("MF35X LIVETRACKER V5.9.12 OTA SIGNED");
   Serial.println("FIREBASE-KONFIG + DYNAMISCHE INTERVALLE");
   Serial.println("ADMIN: ESP32 / WLAN / GPS SOFTWARE-NEUSTART");
   Serial.println("OTA: RSA-SIGNIERT + ZWEITE APP-PARTITION + ROLLBACK-SCHUTZ");
@@ -2629,6 +2733,10 @@ void setup() {
 
   // Erst letzte gueltige Konfiguration laden.
   lokaleKonfigurationLaden();
+
+  // V5.9.12: Datenpartition + PSRAM pruefen und vorhandenen Rueckstau laden.
+  // Die Funktion kennt noch kein WLAN und veraendert die OTA-Partitionen nicht.
+  offlinePufferInitialisieren();
 
   // Ausgang sofort sicher LOW.
   pinMode(SCHALTAUSGANG_PIN, OUTPUT);
@@ -2746,6 +2854,10 @@ void loop() {
 
   // Rennaufzeichnung nutzt das auf der Admin-Seite eingestellte Intervall.
   rennhistorieBearbeiten();
+
+  // Maximal einen gepufferten Datensatz pro Drain-Zyklus nachsenden.
+  // GPIO10/GPIO11 laufen weiterhin unabhaengig im V5.9.11-Steuerungs-Task.
+  offlineDrainBearbeiten();
 
   if (WiFi.status() == WL_CONNECTED &&
       zeitFaellig(jetzt, letzterDeviceStatus, DEVICE_STATUS_INTERVAL_MS)) {
@@ -2959,6 +3071,36 @@ void statusAusgeben() {
     Serial.println(" ms");
   } else {
     Serial.println("AUS");
+  }
+
+  Serial.println("--- Offline-Rennpuffer ---");
+  Serial.print("Puffer: ");
+  Serial.print(offlineBufferReady ? "BEREIT" : "FEHLER");
+  Serial.print(" | pending: ");
+  Serial.print(offlinePendingCount);
+  Serial.print(" | queued/replayed/dropped: ");
+  Serial.print(offlineQueuedCount);
+  Serial.print('/');
+  Serial.print(offlineReplayedCount);
+  Serial.print('/');
+  Serial.println(offlineDroppedCount);
+  Serial.print("Flash: ");
+  Serial.print((unsigned long)offlineFsUsedBytes);
+  Serial.print('/');
+  Serial.print((unsigned long)offlineFsTotalBytes);
+  Serial.print(" Byte | voll: ");
+  Serial.println(offlineBufferFull ? "JA" : "NEIN");
+  Serial.print("PSRAM: ");
+  if (offlinePsramAvailable) {
+    Serial.print((unsigned long)offlinePsramBytes);
+    Serial.print(" Byte | Cache: ");
+    Serial.println((unsigned long)offlinePsramCacheCount);
+  } else {
+    Serial.println("nicht verfuegbar");
+  }
+  if (offlineLastError.length() > 0) {
+    Serial.print("Puffer letzter Fehler: ");
+    Serial.println(offlineLastError);
   }
 
   Serial.println("--- Firmware / OTA ---");

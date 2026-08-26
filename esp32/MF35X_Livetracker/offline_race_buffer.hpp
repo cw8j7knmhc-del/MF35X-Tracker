@@ -4,6 +4,7 @@
 #include <FS.h>
 #include <esp_partition.h>
 #include <esp_system.h>
+#include <esp32-hal-psram.h>
 #include <stddef.h>
 
 // ==================================================
@@ -212,7 +213,6 @@ bool offlineDateiErstenPendingOffset(
     }
 
     if (!offlineRecordGueltig(rec)) {
-      offlineCorruptCount++;
       offset += sizeof(rec);
       continue;
     }
@@ -337,6 +337,46 @@ void offlineLeereQueueDateienAufraeumen() {
   offlineFsStatusAktualisieren();
 }
 
+void offlineUnvollstaendigeDateiEndenReparieren() {
+  if (!offlineBufferReady) return;
+
+  File root = LittleFS.open("/");
+  if (!root) return;
+
+  String pfade[8];
+  size_t groessen[8];
+  size_t anzahl = 0;
+
+  File entry = root.openNextFile();
+  while (entry && anzahl < 8) {
+    String name = entry.name();
+    const size_t size = entry.size();
+    entry.close();
+    if (!name.startsWith("/")) name = "/" + name;
+
+    if (offlineRaceIdAusPfad(name).length() > 0 &&
+        (size % sizeof(OfflineRaceRecord)) != 0) {
+      pfade[anzahl] = name;
+      groessen[anzahl] = size - (size % sizeof(OfflineRaceRecord));
+      anzahl++;
+    }
+    entry = root.openNextFile();
+  }
+  root.close();
+
+  for (size_t i = 0; i < anzahl; ++i) {
+    File file = LittleFS.open(pfade[i], "r+");
+    if (!file) {
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht geoeffnet werden";
+      continue;
+    }
+    if (!file.truncate(groessen[i])) {
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht repariert werden";
+    }
+    file.close();
+  }
+}
+
 void offlineQueueScannen() {
   offlinePendingCount = 0;
   offlineCorruptCount = 0;
@@ -440,6 +480,7 @@ void offlinePufferInitialisieren() {
     if (offlineBootId == 0) offlineBootId = 1;
   }
 
+  offlineUnvollstaendigeDateiEndenReparieren();
   offlineQueueScannen();
 
   Serial.print("OFFLINE-PUFFER: OK | Flash ");
@@ -488,7 +529,7 @@ OfflineRaceRecord offlineRecordBauen() {
 
   if (gpsDaten.satellitesValid) {
     rec.flags |= OFFLINE_FLAG_SATELLITES_VALID;
-    rec.satellites = (uint8_t)min((uint32_t)255, gpsDaten.satellites);
+    rec.satellites = (uint8_t)(gpsDaten.satellites > 255U ? 255U : gpsDaten.satellites);
   }
 
   if (gpsDaten.utcValid && gpsDaten.utcEpochMs > 1700000000000ULL) {

@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.5.12 */
+/* MF35X Tracker Admin V9.5.13 */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get, update, query, orderByChild, startAt, endAt } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -74,6 +74,7 @@ let otaPartitionReady = false;
 let currentFirmwareVersionCode = 0;
 let latestOtaManifest = null;
 let pendingSystemCommand = null;
+let offlineHistoryPendingCount = 0;
 
 
 // ==================================================
@@ -219,6 +220,48 @@ function listenSystemSupport() {
     otaSupported = device.otaSupported === true && device.otaSignedUpdates === true;
     otaPartitionReady = device.otaPartitionReady === true;
     currentFirmwareVersionCode = Number(device.firmwareVersionCode || 0);
+    offlineHistoryPendingCount = Number(device.historyOfflinePending || 0);
+
+    const offlineBadge = document.getElementById("offlineBufferStatus");
+    const offlineDetail = document.getElementById("offlineBufferDetail");
+    if (offlineBadge) {
+      const supported = device.historyOfflineBufferSupported === true;
+      const ready = device.historyOfflineBufferReady === true;
+      const full = device.historyOfflineBufferFull === true;
+      const pending = offlineHistoryPendingCount;
+
+      if (!supported) {
+        offlineBadge.textContent = "nicht unterstützt";
+        offlineBadge.className = "recording-badge recording-badge-wait";
+      } else if (!ready) {
+        offlineBadge.textContent = "FEHLER";
+        offlineBadge.className = "recording-badge recording-badge-wait";
+      } else if (full) {
+        offlineBadge.textContent = `VOLL · ${pending} offen`;
+        offlineBadge.className = "recording-badge recording-badge-wait";
+      } else if (pending > 0) {
+        offlineBadge.textContent = `${pending} gepuffert`;
+        offlineBadge.className = "recording-badge recording-badge-on";
+      } else {
+        offlineBadge.textContent = "bereit · 0";
+        offlineBadge.className = "recording-badge recording-badge-on";
+      }
+
+      if (offlineDetail) {
+        const total = Number(device.historyOfflineFsTotalBytes || 0);
+        const used = Number(device.historyOfflineFsUsedBytes || 0);
+        const replayed = Number(device.historyOfflineReplayed || 0);
+        const dropped = Number(device.historyOfflineDropped || 0);
+        const psram = Number(device.historyOfflinePsramBytes || 0);
+        const err = device.historyOfflineLastError ? ` · Fehler: ${device.historyOfflineLastError}` : "";
+        offlineDetail.textContent =
+          `Flash ${(used / 1024).toFixed(0)} / ${(total / 1024).toFixed(0)} KiB` +
+          ` · PSRAM ${psram > 0 ? (psram / 1024 / 1024).toFixed(1) + " MiB" : "nicht aktiv"}` +
+          ` · nachgesendet ${replayed} · verworfen ${dropped}${err}`;
+      }
+    }
+
+    updateAnalysisDeleteButton();
 
     const firmware = device.firmware || "---";
     const firmwareBadge = document.getElementById("systemFirmwareStatus");
@@ -1113,10 +1156,13 @@ function updateAnalysisDeleteButton() {
   if (!analysisDeleteButton || !analysisRaceSelect) return;
   const raceId = analysisRaceSelect.value;
   const active = recordingState?.enabled === true && recordingState?.raceId === raceId;
-  analysisDeleteButton.disabled = !raceId || active;
+  const offlinePending = offlineHistoryPendingCount > 0;
+  analysisDeleteButton.disabled = !raceId || active || offlinePending;
   analysisDeleteButton.title = active
     ? "Eine laufende Aufzeichnung muss zuerst gestoppt werden."
-    : "Ausgewählte Rennaufzeichnung vollständig löschen";
+    : offlinePending
+      ? "Löschen ist gesperrt, solange der ESP32 noch Offline-Renndaten nachsendet."
+      : "Ausgewählte Rennaufzeichnung vollständig löschen";
 }
 
 async function analysisLoadFullRace() {
