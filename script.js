@@ -1,4 +1,4 @@
-/* MF35X Tracker V9.5.6 – V9.5.1-Layout + GPS-Fix unabhängig vom ESP32-Online-Status */
+/* MF35X Tracker V9.5.11 – Maximalwerte sauber neu erfassen */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -480,7 +480,11 @@ async function resetMaxFromCurrentLive(resetAt) {
     maxRpm: num(currentLive.rpm),
     maxOilTemp: num(currentLive.oil_temp),
     maxCylTemp: num(currentLive.cylinder_temp),
-    minOilPressure: num(currentLive.oil_pressure),
+    minOilPressure:
+      num(currentLive.rpm) != null &&
+      num(currentLive.rpm) >= OIL_PRESSURE_RPM_MIN
+        ? num(currentLive.oil_pressure)
+        : null,
     minBattery: num(currentLive.battery_v),
     resetAt: resetAt
   };
@@ -496,7 +500,17 @@ async function maxv(v) {
     if (v.rpm != null) m.maxRpm = max(m.maxRpm, v.rpm);
     if (v.oilTemp != null) m.maxOilTemp = max(m.maxOilTemp, v.oilTemp);
     if (v.cylTemp != null) m.maxCylTemp = max(m.maxCylTemp, v.cylTemp);
-    if (v.oilPressure != null) m.minOilPressure = min(m.minOilPressure, v.oilPressure);
+
+    // Ein minimaler Oeldruck ist nur bei laufendem Motor aussagekraeftig.
+    // Stillstand/fehlendes RPM-Signal darf deshalb kein 0,0-bar-Minimum erzeugen.
+    if (
+      v.oilPressure != null &&
+      v.rpm != null &&
+      v.rpm >= OIL_PRESSURE_RPM_MIN
+    ) {
+      m.minOilPressure = min(m.minOilPressure, v.oilPressure);
+    }
+
     if (v.battery != null) m.minBattery = min(m.minBattery, v.battery);
 
     return m;
