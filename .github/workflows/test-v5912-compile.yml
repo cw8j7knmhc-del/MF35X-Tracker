@@ -1,0 +1,42 @@
+name: Test V5.9.12 compile
+
+on:
+  push:
+    branches: [feature/v5.9.12-offline-race-buffer]
+    paths:
+      - '.github/workflows/test-v5912-compile.yml'
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v5.9.12-offline-race-buffer
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile N8R8 with OPI PSRAM
+        run: |
+          rm -rf build
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
+            --output-dir build \
+            esp32/MF35X_Livetracker
