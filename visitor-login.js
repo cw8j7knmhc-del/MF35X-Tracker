@@ -8,7 +8,6 @@ const VISITOR_PASSWORD = "mf35x";
 const SESSION_KEY = "mf35x_visitor_access_v1";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
 const TRACKER_SCRIPT_URL = "./script.js?v=9.5.6";
-const ESP32_STATUS_NOTIFICATION_SCRIPT_URL = "./esp32-status-notifications.js?v=9.5.12";
 
 const loginSection = document.getElementById("visitorLogin");
 const loginForm = document.getElementById("visitorLoginForm");
@@ -27,10 +26,9 @@ let trackerStartPromise = null;
  * so wie vor Einbau des Besucherpassworts. Die eigentliche Besucheroberflaeche
  * bleibt trotzdem verborgen, bis das korrekte Passwort eingegeben wurde.
  *
- * Damit laufen die vorhandenen kostenlosen Browser-Benachrichtigungen sowie
- * die ESP32-Online/Offline-Ueberwachung waehrend derselben Browser-/PWA-Sitzung
- * weiter. Es werden dafuer keine Cloud Functions und kein kostenpflichtiger
- * Firebase-Tarif verwendet.
+ * Damit kann die bereits vorhandene Alarm-/Benachrichtigungslogik waehrend
+ * derselben PWA-Sitzung weiterlaufen. Die ESP32-Online/Offline-Einstellung
+ * gehoert ausschliesslich in den Admin-Bereich und wird hier nicht geladen.
  */
 startTrackerInBackground().catch(error => {
   console.error("Tracker-Hintergrundstart fehlgeschlagen:", error);
@@ -84,7 +82,6 @@ async function startTrackerInBackground() {
   trackerStartPromise = (async () => {
     await loadLeaflet();
     await import(`${TRACKER_SCRIPT_URL}-${Date.now()}`);
-    await import(`${ESP32_STATUS_NOTIFICATION_SCRIPT_URL}-${Date.now()}`);
     trackerStarted = true;
   })();
 
