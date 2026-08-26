@@ -139,4 +139,6 @@ jobs:
           )"
 
           git commit -m "Build signed firmware ${VERSION} [skip ci]"
-          git push
+          git fetch origin main
+          git rebase origin/main
+          git push origin HEAD:main
