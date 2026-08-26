@@ -1,6 +1,6 @@
-/* MF35X Tracker V9.5.11 – Maximalwerte sauber neu erfassen */
+/* MF35X Tracker V9.5.12 – Besucher liest Maximalwerte/Alarmhistorie nur noch */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, onValue, set, get, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
@@ -24,7 +24,6 @@ let last = 0;
 let lastPos = null;
 let first = true;
 let currentLive = null;
-let lastMaxResetAt = 0;
 let settingsReady = false;
 let oilPressureEngineStartAt = 0;
 
@@ -41,7 +40,6 @@ const LIVE_TIMEOUT_FACTOR = 3;
 let liveTimeoutMs = MIN_LIVE_TIMEOUT_MS;
 
 const HMAX = 60;
-const AMAX = 30;
 const OIL_PRESSURE_RPM_MIN = 400;
 const OIL_PRESSURE_START_DELAY_MS = 5000;
 
@@ -88,14 +86,6 @@ onValue(ref(db, "tracker/settings"), s => {
 
 onValue(ref(db, "tracker/maxValues"), s => renderMax(s.val() || {}));
 onValue(ref(db, "tracker/alarmHistory"), s => renderHist(s.val() || []));
-
-onValue(ref(db, "tracker/commands/resetMaxValues"), s => {
-  let cmd = s.val();
-  if (cmd && cmd.resetAt && cmd.resetAt !== lastMaxResetAt) {
-    lastMaxResetAt = cmd.resetAt;
-    resetMaxFromCurrentLive(cmd.resetAt);
-  }
-});
 
 onValue(ref(db, "tracker/live"), s => {
   let d = s.val();
@@ -174,14 +164,6 @@ onValue(ref(db, "tracker/live"), s => {
   txt("cyltemp", ct != null ? Math.round(ct) : "---");
 
   gpsq(hd, gpsValid);
-  maxv({
-    speed,
-    rpm,
-    oilTemp: ot,
-    cylTemp: ct,
-    oilPressure: op,
-    battery: bat
-  });
   evaluateAlarms();
 
   add("oilTemp", ot);
@@ -472,75 +454,26 @@ function banner(a) {
   t.innerText = a.map(x => x.text).join(" · ");
 }
 
-async function resetMaxFromCurrentLive(resetAt) {
-  if (!currentLive) return;
 
-  let n = {
-    maxSpeed: num(currentLive.speed_kmh),
-    maxRpm: num(currentLive.rpm),
-    maxOilTemp: num(currentLive.oil_temp),
-    maxCylTemp: num(currentLive.cylinder_temp),
-    minOilPressure:
-      num(currentLive.rpm) != null &&
-      num(currentLive.rpm) >= OIL_PRESSURE_RPM_MIN
-        ? num(currentLive.oil_pressure)
-        : null,
-    minBattery: num(currentLive.battery_v),
-    resetAt: resetAt
-  };
 
-  await set(ref(db, "tracker/maxValues"), n);
-}
 
-async function maxv(v) {
-  await runTransaction(ref(db, "tracker/maxValues"), m => {
-    m = m || {};
 
-    if (v.speed != null) m.maxSpeed = max(m.maxSpeed, v.speed);
-    if (v.rpm != null) m.maxRpm = max(m.maxRpm, v.rpm);
-    if (v.oilTemp != null) m.maxOilTemp = max(m.maxOilTemp, v.oilTemp);
-    if (v.cylTemp != null) m.maxCylTemp = max(m.maxCylTemp, v.cylTemp);
 
-    // Ein minimaler Oeldruck ist nur bei laufendem Motor aussagekraeftig.
-    // Stillstand/fehlendes RPM-Signal darf deshalb kein 0,0-bar-Minimum erzeugen.
-    if (
-      v.oilPressure != null &&
-      v.rpm != null &&
-      v.rpm >= OIL_PRESSURE_RPM_MIN
-    ) {
-      m.minOilPressure = min(m.minOilPressure, v.oilPressure);
-    }
 
-    if (v.battery != null) m.minBattery = min(m.minBattery, v.battery);
-
-    return m;
-  });
-}
-
-async function hist(a) {
-  let cur = new Set(a.map(x => x.key));
-  let neu = a.filter(x => !active.has(x.key));
+function hist(a) {
+  const cur = new Set(a.map(x => x.key));
+  const neu = a.filter(x => !active.has(x.key));
   active = cur;
 
-  if (!neu.length) return;
-
-  let s = await get(ref(db, "tracker/alarmHistory"));
-  let ar = s.val() || [];
-
-  neu.forEach(x => {
-    ar.unshift({
-      time: new Date().toLocaleTimeString("de-AT"),
-      level: x.level,
-      text: x.text
-    });
-    notify("MF35X Alarm", x.text);
-  });
-
-  set(ref(db, "tracker/alarmHistory"), ar.slice(0, AMAX));
+  // Historie selbst wird ab V5.9.13 ausschliesslich vom ESP32 geschrieben.
+  // Der Browser darf weiterhin lokale Benachrichtigungen anzeigen.
+  neu.forEach(x => notify("MF35X Alarm", x.text));
 }
 
-function renderHist(ar) {
-  let c = document.getElementById("alarmHistory");
+
+function renderHist(raw) {
+  const c = document.getElementById("alarmHistory");
+  const ar = normalizeAlarmHistory(raw);
 
   if (!ar.length) {
     c.innerHTML = '<div class="empty-history">Noch keine Alarme.</div>';
@@ -552,12 +485,48 @@ function renderHist(ar) {
       e =>
         `<div class="alarm-entry ${
           e.level == "warning" ? "warning-entry" : ""
-        }"><div class="alarm-time">${e.time}</div><div class="alarm-message">${
-          e.text
+        }"><div class="alarm-time">${formatAlarmHistoryTime(e)}</div><div class="alarm-message">${
+          e.text || "Alarm"
         }</div></div>`
     )
     .join("");
 }
+
+function normalizeAlarmHistory(raw) {
+  let ar = [];
+  if (Array.isArray(raw)) {
+    ar = raw.filter(Boolean);
+  } else if (raw && typeof raw === "object") {
+    ar = Object.values(raw).filter(x => x && typeof x === "object");
+  }
+
+  return ar
+    .map((entry, index) => ({ ...entry, __order: index }))
+    .sort((a, b) => {
+      const ta = Number(a.timestamp || 0);
+      const tb = Number(b.timestamp || 0);
+      if (tb !== ta) return tb - ta;
+      const sa = Number(a.sequence || 0);
+      const sb = Number(b.sequence || 0);
+      if (sb !== sa) return sb - sa;
+      return a.__order - b.__order;
+    })
+    .slice(0, 30);
+}
+
+function formatAlarmHistoryTime(entry) {
+  const timestamp = Number(entry.timestamp || 0);
+  if (Number.isFinite(timestamp) && timestamp > 0) {
+    return new Date(timestamp).toLocaleString("de-AT");
+  }
+  if (entry.time) return entry.time;
+  const uptime = Number(entry.capturedUptimeMs);
+  if (Number.isFinite(uptime) && uptime >= 0) {
+    return `Uptime ${Math.round(uptime / 1000)} s`;
+  }
+  return "---";
+}
+
 
 function renderMax(m) {
   txt("maxSpeed", m.maxSpeed != null ? Number(m.maxSpeed).toFixed(1) : "---");
@@ -571,13 +540,11 @@ function renderMax(m) {
   txt("minBattery", m.minBattery != null ? Number(m.minBattery).toFixed(1) : "---");
 }
 
-function max(c, v) {
-  return c == null ? v : Math.max(c, v);
-}
 
-function min(c, v) {
-  return c == null ? v : Math.min(c, v);
-}
+
+
+
+
 
 function fmt(v) {
   return Number.isInteger(v) ? v : v.toFixed(1);

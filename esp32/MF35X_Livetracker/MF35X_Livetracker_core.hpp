@@ -16,7 +16,7 @@
 #include <freertos/semphr.h>
 
 // ==================================================
-// MF35X LIVETRACKER V5.9.12 OTA SIGNED - OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG
+// MF35X LIVETRACKER V5.9.13 OTA SIGNED - ESP32-MAXWERTE/ALARME + OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG
 // GPS + OELTEMP + OELDRUCK + BATTERIE + ZYLINDERTEMP
 // + DREHZAHL + SCHALTAUSGANG + FIREBASE-KONFIGURATION
 // + DYNAMISCHE UPDATEINTERVALLE + RENNHISTORIE
@@ -2172,6 +2172,9 @@ String historyJsonBauen() {
 // V5.9.12: Durable Offline-Warteschlange fuer Rennmesspunkte.
 #include "offline_race_buffer.hpp"
 
+// V5.9.13: Maximalwerte und Alarmhistorie werden zentral vom ESP32 erzeugt.
+#include "device_metrics_alarm.hpp"
+
 // ==================================================
 // DYNAMISCHE LIVE-UPLOADS
 // ==================================================
@@ -2199,6 +2202,9 @@ void liveUpdatesBearbeiten() {
 
   if (rpmDue) letzterRpmUpload = jetzt;
   if (gpsDue) letzterGpsUpload = jetzt;
+
+  // V5.9.13: Maximalwerte und Alarmzustand werden lokal und netzunabhaengig ausgewertet.
+  deviceDerivedDataAktualisieren();
 
   if (WiFi.status() != WL_CONNECTED) return;
 
@@ -2629,6 +2635,9 @@ void systemBefehlePruefen(const String& configJson) {
     commandStatusSenden("esp32_reboot", requestId, "completed");
   }
 
+  // V5.9.13: Admin-Reset der Maximalwerte wird vom ESP32 selbst ausgefuehrt.
+  deviceDerivedDataCommandBearbeiten(commandsJson);
+
   if (commandAusObjektLesen(commandsJson, "gps_restart", requestId, status) &&
       requestId != letzterGpsCommandId) {
     letzterGpsCommandId = requestId;
@@ -2676,6 +2685,13 @@ void deviceStatusSenden() {
   jsonBoolFeld(json, first, "otaPendingValidation", otaIstPendingVerify());
   jsonText(json, first, "otaManifestUrl", OTA_MANIFEST_URL);
   jsonBoolFeld(json, first, "historySupported", true);
+  jsonBoolFeld(json, first, "maxValuesDeviceOwned", true);
+  jsonBoolFeld(json, first, "alarmHistoryDeviceOwned", true);
+  jsonBoolFeld(json, first, "alarmHistoryOfflineBufferReady", deviceAlarmQueueReady);
+  jsonULongFeld(json, first, "alarmHistoryOfflinePending", deviceAlarmPendingCount);
+  jsonULongFeld(json, first, "alarmHistoryOfflineQueued", deviceAlarmQueuedCount);
+  jsonULongFeld(json, first, "alarmHistoryOfflineReplayed", deviceAlarmReplayedCount);
+  jsonULongFeld(json, first, "alarmHistoryOfflineDropped", deviceAlarmDroppedCount);
   jsonBoolFeld(json, first, "historyOfflineBufferSupported", true);
   jsonBoolFeld(json, first, "historyOfflineBufferReady", offlineBufferReady);
   jsonBoolFeld(json, first, "historyOfflineBufferFull", offlineBufferFull);
@@ -2723,7 +2739,7 @@ void setup() {
 
   Serial.println();
   Serial.println("============================================");
-  Serial.println("MF35X LIVETRACKER V5.9.12 OTA SIGNED");
+  Serial.println("MF35X LIVETRACKER V5.9.13 OTA SIGNED");
   Serial.println("FIREBASE-KONFIG + DYNAMISCHE INTERVALLE");
   Serial.println("ADMIN: ESP32 / WLAN / GPS SOFTWARE-NEUSTART");
   Serial.println("OTA: RSA-SIGNIERT + ZWEITE APP-PARTITION + ROLLBACK-SCHUTZ");
@@ -2737,6 +2753,9 @@ void setup() {
   // V5.9.12: Datenpartition + PSRAM pruefen und vorhandenen Rueckstau laden.
   // Die Funktion kennt noch kein WLAN und veraendert die OTA-Partitionen nicht.
   offlinePufferInitialisieren();
+
+  // V5.9.13: lokale Maximalwerte + Alarmqueue laden.
+  deviceDerivedDataInitialisieren();
 
   // Ausgang sofort sicher LOW.
   pinMode(SCHALTAUSGANG_PIN, OUTPUT);
@@ -2793,12 +2812,15 @@ void setup() {
 
   // Einmal lokale Werte erfassen.
   alleSensorenEinmalLesen();
+  deviceDerivedDataAktualisieren();
 
   wlanVerbinden();
 
   if (WiFi.status() == WL_CONNECTED) {
     // Beim Start sofort die aktuellen Website-Werte uebernehmen.
     firebaseKonfigurationLaden(true);
+    // Vor dem Device-Status alte browserbasierte Maxwerte einmalig einlesen und zusammenfuehren.
+    deviceDerivedDataBearbeiten();
     deviceStatusSenden();
 
     // Ersten kompletten Datensatz unmittelbar senden.
@@ -2851,6 +2873,9 @@ void loop() {
 
   // Alle Website-Intervalle werden hier wirksam.
   liveUpdatesBearbeiten();
+
+  // V5.9.13: NVS-Sicherung, Maxwert-Sync und Alarm-Nachsenden.
+  deviceDerivedDataBearbeiten();
 
   // Rennaufzeichnung nutzt das auf der Admin-Seite eingestellte Intervall.
   rennhistorieBearbeiten();
@@ -3071,6 +3096,22 @@ void statusAusgeben() {
     Serial.println(" ms");
   } else {
     Serial.println("AUS");
+  }
+
+  Serial.println("--- ESP32-Maximalwerte / Alarmhistorie ---");
+  Serial.print("Datenquelle: ESP32 | Max-NVS: " );
+  Serial.print(deviceMaxNvsDirty ? "offen" : "gesichert");
+  Serial.print(" | Alarm pending/queued/replayed/dropped: " );
+  Serial.print(deviceAlarmPendingCount);
+  Serial.print('/');
+  Serial.print(deviceAlarmQueuedCount);
+  Serial.print('/');
+  Serial.print(deviceAlarmReplayedCount);
+  Serial.print('/');
+  Serial.println(deviceAlarmDroppedCount);
+  if (deviceAlarmLastError.length() > 0) {
+    Serial.print("Alarm-Puffer letzter Fehler: " );
+    Serial.println(deviceAlarmLastError);
   }
 
   Serial.println("--- Offline-Rennpuffer ---");
