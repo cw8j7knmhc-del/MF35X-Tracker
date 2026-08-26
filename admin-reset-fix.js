@@ -1,5 +1,5 @@
 import { getApps, getApp, initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import { getDatabase, ref, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const DEFAULT_LIMITS = {
@@ -19,11 +19,14 @@ const DEFAULT_OUTPUT_CONFIG = {
   rpm_off: 3150
 };
 
+// Muss mit dem aktuellen ESP32-Referenzstand übereinstimmen.
+// Die interne GPS-Verarbeitung bleibt 10 Hz; 1000 ms betrifft nur den
+// Firebase-/Website-Upload der GPS-Daten.
 const DEFAULT_INTERVALS = {
   rpm_firebase_update_ms: 250,
   oil_pressure_update_ms: 100,
   temperature_update_ms: 1000,
-  gps_update_ms: 100,
+  gps_update_ms: 1000,
   history_update_ms: 5000
 };
 
@@ -59,6 +62,26 @@ function withResetButton(button, workingText, action) {
       button.textContent = originalText;
     }
   }, true);
+}
+
+// Den Hinweis in der Adminoberfläche an den tatsächlichen Firmware-Standard angleichen.
+const gpsInput = document.getElementById("setGpsUpdateMs");
+const gpsHint = gpsInput?.closest("label")?.querySelector(".field-hint");
+if (gpsHint) {
+  gpsHint.textContent =
+    "Position und Geschwindigkeit gemeinsam · einstellbar 100–3000 ms · Standard 1000 ms";
+}
+
+// Falls noch überhaupt keine Intervall-Konfiguration existiert, vor dem Start der
+// Admin-Listener den korrekten Firmware-Standard anlegen. Bestehende Benutzerwerte
+// werden ausdrücklich nicht verändert.
+try {
+  const intervalSnapshot = await get(ref(db, "tracker/config/intervals"));
+  if (!intervalSnapshot.exists()) {
+    await set(ref(db, "tracker/config/intervals"), DEFAULT_INTERVALS);
+  }
+} catch (error) {
+  console.warn("Intervall-Standard konnte nicht vorab geprüft werden:", error);
 }
 
 // --------------------------------------------------
@@ -134,7 +157,7 @@ withResetButton(
 
       setStatus(
         "intervalStatus",
-        "Standardintervalle 250 / 100 / 1000 / 100 / 5000 ms geladen und gespeichert.",
+        "Standardintervalle 250 / 100 / 1000 / 1000 / 5000 ms geladen und gespeichert.",
         "success"
       );
     } catch (error) {
