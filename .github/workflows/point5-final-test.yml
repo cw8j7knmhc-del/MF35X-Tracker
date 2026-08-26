@@ -1,0 +1,61 @@
+name: Point 5 final compile
+
+on:
+  push:
+    branches:
+      - feature/point5-device-owned-max-alarm
+    paths:
+      - 'tools/point5_finalize.py'
+      - '.github/workflows/point5-final-test.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/point5-device-owned-max-alarm
+
+      - name: Apply final Point 5 patch
+        run: python3 tools/point5_finalize.py
+
+      - name: Check JavaScript syntax
+        run: |
+          node --check admin.js
+          node --check script.js
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile V5.9.13 with OPI PSRAM
+        run: |
+          rm -rf build
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
+            --output-dir build \
+            esp32/MF35X_Livetracker
+
+      - name: Commit final product correction
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add esp32/MF35X_Livetracker/device_metrics_alarm.hpp admin.js
+          git commit -m "V5.9.13: clear alarm history through ESP32" || exit 0
+          git push
