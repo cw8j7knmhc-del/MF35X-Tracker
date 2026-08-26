@@ -6,14 +6,14 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>MF35X Admin V9.5.11</title>
+  <title>MF35X Admin V9.5.12</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="style.css?v=9.5.9">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.5.11</div>
+  <div class="version">Version 9.5.12</div>
 </header>
 
 <main>
@@ -163,7 +163,7 @@
       <label>
         GPS-Position und GPS-Geschwindigkeit (ms)
         <input id="setGpsUpdateMs" type="number" min="100" max="3000" step="100">
-        <span class="field-hint">Position und Geschwindigkeit gemeinsam · einstellbar 100–3000 ms · Standard 100 ms</span>
+        <span class="field-hint">Position und Geschwindigkeit gemeinsam · einstellbar 100–3000 ms · Standard 1000 ms</span>
       </label>
 
       <label>
@@ -357,11 +357,12 @@
 <script type="module">
   // Bei jedem Aufruf eine frische admin.js laden. Dadurch wird eine Änderung
   // des Passworts nicht mehr durch eine alte Browser-/GitHub-Cachedatei verdeckt.
-  await import(`./admin.js?v=9.5.11-${Date.now()}`);
+  await import(`./admin.js?v=9.5.12-${Date.now()}`);
+  await import(`./admin-reset-fix.js?v=9.5.12-${Date.now()}`);
 
   const { getApps, getApp, initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
   const { getDatabase, ref, onValue, set } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
-  const { firebaseConfig } = await import(`./firebase-config.js?v=9.5.11-${Date.now()}`);
+  const { firebaseConfig } = await import(`./firebase-config.js?v=9.5.12-${Date.now()}`);
 
   const outputApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
   const outputDb = getDatabase(outputApp);
