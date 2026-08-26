@@ -1,4 +1,5 @@
 name: Build signed MF35X firmware
+# Publish step rebases onto the latest main before pushing signed OTA artifacts.
 
 on:
   workflow_dispatch:
