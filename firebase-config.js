@@ -11,12 +11,15 @@ const firebaseConfig = {
 export { firebaseConfig };
 
 /*
- * Die ESP32-Online/Offline-Benachrichtigung ist bewusst eine reine Admin-Funktion.
- * Sie wird nur auf admin.html geladen. Die Besucheransicht kennt weder den Schalter
- * noch diese Statusueberwachung.
+ * Die ESP32-Online/Offline-Einstellung ist bewusst eine reine Admin-Funktion.
+ * Nur auf admin.html wird der Schalter angezeigt und kann verändert werden.
  *
- * admin.html laedt firebase-config.js an mehreren Stellen mit unterschiedlichen
- * Cache-Parametern. Der globale Guard verhindert deshalb einen doppelten Start.
+ * Wenn die Funktion auf diesem Browser/PWA im Admin aktiviert wurde, darf die
+ * eigentliche Überwachung anschließend auch unsichtbar in der Besucheransicht
+ * weiterlaufen. Dadurch bleiben Meldungen beim Wechsel vom Admin zur Liveansicht aktiv.
+ *
+ * admin.html lädt firebase-config.js an mehreren Stellen mit unterschiedlichen
+ * Cache-Parametern. Der globale Guard verhindert deshalb einen doppelten Admin-Start.
  */
 if (
   typeof window !== "undefined" &&
@@ -26,7 +29,7 @@ if (
   window.__mf35xEsp32StatusLoaderStarted = true;
 
   setTimeout(() => {
-    import(`./esp32-status-notifications.js?v=9.5.13-${Date.now()}`).catch(error => {
+    import(`./esp32-status-notifications.js?v=9.5.14-${Date.now()}`).catch(error => {
       console.error("ESP32-Statusbenachrichtigung konnte nicht geladen werden:", error);
     });
   }, 0);
