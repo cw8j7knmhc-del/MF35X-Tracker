@@ -8,6 +8,7 @@ const VISITOR_PASSWORD = "mf35x";
 const SESSION_KEY = "mf35x_visitor_access_v1";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
 const TRACKER_SCRIPT_URL = "./script.js?v=9.5.6";
+const ESP32_STATUS_NOTIFICATION_SCRIPT_URL = "./esp32-status-notifications.js?v=9.5.12";
 
 const loginSection = document.getElementById("visitorLogin");
 const loginForm = document.getElementById("visitorLoginForm");
@@ -83,6 +84,7 @@ async function startTrackerInBackground() {
   trackerStartPromise = (async () => {
     await loadLeaflet();
     await import(`${TRACKER_SCRIPT_URL}-${Date.now()}`);
+    await import(`${ESP32_STATUS_NOTIFICATION_SCRIPT_URL}-${Date.now()}`);
     trackerStarted = true;
   })();
 
