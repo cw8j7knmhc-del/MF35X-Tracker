@@ -1,0 +1,247 @@
+name: Apply V5.9.12 offline race buffer
+
+on:
+  push:
+    branches: [feature/v5.9.12-offline-race-buffer]
+    paths:
+      - '.github/workflows/apply-v5912-offline-buffer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v5.9.12-offline-race-buffer
+          fetch-depth: 0
+
+      - name: Apply exact scoped patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          core_path = Path('esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp')
+          ino_path = Path('esp32/MF35X_Livetracker/MF35X_Livetracker.ino')
+          ver_path = Path('esp32/MF35X_Livetracker/firmware_version.h')
+          buf_path = Path('esp32/MF35X_Livetracker/offline_race_buffer.hpp')
+          build_path = Path('.github/workflows/build-firmware.yml')
+          admin_html_path = Path('admin.html')
+          admin_js_path = Path('admin.js')
+
+          core = core_path.read_text()
+          ino = ino_path.read_text()
+          ver = ver_path.read_text()
+          buf = buf_path.read_text()
+          build = build_path.read_text()
+          admin_html = admin_html_path.read_text()
+          admin_js = admin_js_path.read_text()
+
+          def one(text, old, new, label):
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: erwartet 1 Treffer, gefunden {n}')
+              return text.replace(old, new, 1)
+
+          core = one(
+              core,
+              '// MF35X LIVETRACKER V5.9.11 OTA SIGNED - NETZUNABHAENGIGE GPIO11-STEUERUNG',
+              '// MF35X LIVETRACKER V5.9.12 OTA SIGNED - OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG',
+              'Core Version'
+          )
+
+          core = one(
+              core,
+              '''  bool satellitesValid;\n  uint32_t satellites;\n\n  uint32_t charsProcessed;''',
+              '''  bool satellitesValid;\n  uint32_t satellites;\n\n  // V5.9.12: GPS-UTC wird fuer netzunabhaengige Renn-Zeitstempel genutzt.\n  bool utcValid;\n  uint64_t utcEpochMs;\n  unsigned long utcUpdateMillis;\n\n  uint32_t charsProcessed;''',
+              'GPS UTC Snapshot'
+          )
+
+          core = one(
+              core,
+              '''bool firebasePatch(const String& pfad, const String& json, bool alsLiveUpload);\nbool firebasePost(const String& pfad, const String& json);''',
+              '''bool firebasePatch(const String& pfad, const String& json, bool alsLiveUpload);\nbool firebasePost(const String& pfad, const String& json);\nbool firebasePut(const String& pfad, const String& json);''',
+              'firebasePut Prototyp'
+          )
+
+          core = one(
+              core,
+              '''  intervalConfig.historyUpdateMs = preferences.getULong("hint", intervalConfig.historyUpdateMs);\n\n  alarmConfig.batteryWarn''',
+              '''  intervalConfig.historyUpdateMs = preferences.getULong("hint", intervalConfig.historyUpdateMs);\n\n  // V5.9.12: Laufende Rennaufzeichnung ebenfalls lokal merken. Dadurch kann\n  // nach einem Stromausfall auch ohne sofortige Firebase-Verbindung weiter\n  // aufgezeichnet und in den Offline-Puffer geschrieben werden.\n  recordingConfig.enabled = preferences.getBool("rec_en", false);\n  recordingConfig.raceId = preferences.getString("rec_id", "");\n  recordingConfig.raceName = preferences.getString("rec_name", "");\n  recordingConfig.historyUpdateMs = preferences.getULong("rec_int", intervalConfig.historyUpdateMs);\n  if (recordingConfig.raceId.length() == 0) recordingConfig.enabled = false;\n  if (recordingConfig.historyUpdateMs < 1000UL || recordingConfig.historyUpdateMs > 60000UL) {\n    recordingConfig.historyUpdateMs = intervalConfig.historyUpdateMs;\n  }\n\n  alarmConfig.batteryWarn''',
+              'Recording NVS Laden'
+          )
+
+          core = one(
+              core,
+              '''  preferences.putULong("hint", intervalConfig.historyUpdateMs);\n\n  preferences.putFloat("bw", alarmConfig.batteryWarn);''',
+              '''  preferences.putULong("hint", intervalConfig.historyUpdateMs);\n\n  preferences.putBool("rec_en", recordingConfig.enabled);\n  preferences.putString("rec_id", recordingConfig.raceId);\n  preferences.putString("rec_name", recordingConfig.raceName);\n  preferences.putULong("rec_int", recordingConfig.historyUpdateMs);\n\n  preferences.putFloat("bw", alarmConfig.batteryWarn);''',
+              'Recording NVS Speichern'
+          )
+
+          firebase_post = '''bool firebasePost(const String& pfad, const String& json) {\n  if (WiFi.status() != WL_CONNECTED) return false;\n\n  WiFiClientSecure client;\n  client.setInsecure();\n\n  HTTPClient http;\n  http.setTimeout(4000);\n\n  String url = firebaseUrl(pfad);\n\n  if (!http.begin(client, url)) {\n    letzterHttpCode = -1;\n    return false;\n  }\n\n  http.addHeader("Content-Type", "application/json");\n  int code = http.POST(json);\n  letzterHttpCode = code;\n\n  bool ok = (code == 200);\n  http.end();\n  gpsEinlesen();\n  return ok;\n}\n'''
+
+          firebase_put = firebase_post + '''\n// V5.9.12: Deterministischer PUT fuer Rennsamples. Derselbe Messpunkt kann\n// nach einem Timeout gefahrlos erneut gesendet werden, ohne Duplikate zu erzeugen.\nbool firebasePut(const String& pfad, const String& json) {\n  if (WiFi.status() != WL_CONNECTED) return false;\n\n  WiFiClientSecure client;\n  client.setInsecure();\n\n  HTTPClient http;\n  http.setTimeout(4000);\n\n  String url = firebaseUrl(pfad);\n  if (!http.begin(client, url)) {\n    letzterHttpCode = -1;\n    return false;\n  }\n\n  http.addHeader("Content-Type", "application/json");\n  int code = http.PUT(json);\n  letzterHttpCode = code;\n  bool ok = (code == 200);\n  http.end();\n  gpsEinlesen();\n  return ok;\n}\n'''
+          core = one(core, firebase_post, firebase_put, 'firebasePut Implementierung')
+
+          core = one(
+              core,
+              '''  AlarmConfig alarmVorher = alarmConfig;\n\n  String configJson;''',
+              '''  AlarmConfig alarmVorher = alarmConfig;\n  RecordingConfig recordingVorher = recordingConfig;\n\n  String configJson;''',
+              'Recording vorher'
+          )
+
+          core = one(
+              core,
+              '''    intervalVorher.historyUpdateMs != intervalConfig.historyUpdateMs ||\n    floatAnders(alarmVorher.batteryWarn, alarmConfig.batteryWarn) ||''',
+              '''    intervalVorher.historyUpdateMs != intervalConfig.historyUpdateMs ||\n    recordingVorher.enabled != recordingConfig.enabled ||\n    recordingVorher.raceId != recordingConfig.raceId ||\n    recordingVorher.raceName != recordingConfig.raceName ||\n    recordingVorher.historyUpdateMs != recordingConfig.historyUpdateMs ||\n    floatAnders(alarmVorher.batteryWarn, alarmConfig.batteryWarn) ||''',
+              'Recording Aenderungserkennung'
+          )
+
+          gps_marker = '''void gpsParserSnapshotAktualisieren() {\n  GpsSnapshot neu = gpsSnapshotLesen();\n'''
+          gps_helpers = '''// UTC-Konvertierung ohne lokale Zeitzone. Grundlage ist die GPS-Zeit aus RMC.\nint64_t gpsTageSeitUnixEpoch(int jahr, unsigned monat, unsigned tag) {\n  jahr -= monat <= 2;\n  const int era = (jahr >= 0 ? jahr : jahr - 399) / 400;\n  const unsigned yoe = (unsigned)(jahr - era * 400);\n  const unsigned doy = (153 * (monat + (monat > 2 ? -3 : 9)) + 2) / 5 + tag - 1;\n  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;\n  return (int64_t)era * 146097 + (int64_t)doe - 719468;\n}\n\nuint64_t gpsUtcEpochMsBerechnen() {\n  const int jahr = gps.date.year();\n  const unsigned monat = gps.date.month();\n  const unsigned tag = gps.date.day();\n  if (jahr < 2020 || monat < 1 || monat > 12 || tag < 1 || tag > 31) return 0;\n\n  const int64_t tage = gpsTageSeitUnixEpoch(jahr, monat, tag);\n  if (tage < 0) return 0;\n\n  uint64_t sekunden = (uint64_t)tage * 86400ULL;\n  sekunden += (uint64_t)gps.time.hour() * 3600ULL;\n  sekunden += (uint64_t)gps.time.minute() * 60ULL;\n  sekunden += (uint64_t)gps.time.second();\n  return sekunden * 1000ULL + (uint64_t)gps.time.centisecond() * 10ULL;\n}\n\n''' + gps_marker
+          core = one(core, gps_marker, gps_helpers, 'GPS UTC Helper')
+
+          core = one(
+              core,
+              '''  neu.satellitesValid = gps.satellites.isValid();\n  if (neu.satellitesValid) {\n    neu.satellites = gps.satellites.value();\n  } else {\n    neu.satellites = 0;\n  }\n\n  neu.charsProcessed = gps.charsProcessed();''',
+              '''  neu.satellitesValid = gps.satellites.isValid();\n  if (neu.satellitesValid) {\n    neu.satellites = gps.satellites.value();\n  } else {\n    neu.satellites = 0;\n  }\n\n  // RMC liefert Datum + UTC-Zeit unabhaengig von LTE/Firebase.\n  if (gps.date.isValid() && gps.time.isValid()) {\n    const unsigned long dateAge = gps.date.age();\n    const unsigned long timeAge = gps.time.age();\n    if (dateAge != ULONG_MAX && timeAge != ULONG_MAX &&\n        dateAge <= 2000UL && timeAge <= 2000UL) {\n      const uint64_t epoch = gpsUtcEpochMsBerechnen();\n      if (epoch > 1700000000000ULL) {\n        neu.utcValid = true;\n        neu.utcEpochMs = epoch;\n        const unsigned long age = dateAge > timeAge ? dateAge : timeAge;\n        neu.utcUpdateMillis = millis() - age;\n      }\n    }\n  }\n\n  neu.charsProcessed = gps.charsProcessed();''',
+              'GPS UTC Snapshot Update'
+          )
+
+          core = one(
+              core,
+              '''  json += '}';\n  return json;\n}\n\n// ==================================================\n// DYNAMISCHE LIVE-UPLOADS''',
+              '''  json += '}';\n  return json;\n}\n\n// V5.9.12: Durable Offline-Warteschlange fuer Rennmesspunkte.\n#include "offline_race_buffer.hpp"\n\n// ==================================================\n// DYNAMISCHE LIVE-UPLOADS''',
+              'Offline Header Include'
+          )
+
+          old_history = '''void rennhistorieBearbeiten() {\n  if (!recordingConfig.enabled || recordingConfig.raceId.length() == 0) {\n    return;\n  }\n\n  unsigned long jetzt = millis();\n  unsigned long intervall = recordingConfig.historyUpdateMs;\n\n  if (intervall < 1000UL || intervall > 60000UL) {\n    intervall = intervalConfig.historyUpdateMs;\n  }\n\n  if (!zeitFaellig(jetzt, letzterHistoryUpload, intervall)) return;\n\n  letzterHistoryUpload = jetzt;\n\n  if (WiFi.status() != WL_CONNECTED) return;\n\n  String pfad = "tracker/races/";\n  pfad += recordingConfig.raceId;\n  pfad += "/samples";\n\n  String json = historyJsonBauen();\n\n  if (firebasePost(pfad, json)) {\n    historyOk++;\n  } else {\n    historyFehler++;\n  }\n}\n'''
+          new_history = '''void rennhistorieBearbeiten() {\n  if (!recordingConfig.enabled || recordingConfig.raceId.length() == 0) {\n    return;\n  }\n\n  unsigned long jetzt = millis();\n  unsigned long intervall = recordingConfig.historyUpdateMs;\n\n  if (intervall < 1000UL || intervall > 60000UL) {\n    intervall = intervalConfig.historyUpdateMs;\n  }\n\n  if (!zeitFaellig(jetzt, letzterHistoryUpload, intervall)) return;\n  letzterHistoryUpload = jetzt;\n\n  // V5.9.12: Immer einen Messpunkt erzeugen - auch ohne WLAN.\n  // Versand bzw. dauerhafte Pufferung entscheidet die Offline-Queue.\n  offlineRennMesspunktBearbeiten();\n}\n'''
+          core = one(core, old_history, new_history, 'Rennhistorie Offline')
+
+          core = one(
+              core,
+              '''  jsonBoolFeld(json, first, "historySupported", true);\n  jsonBoolFeld(json, first, "systemCommandsSupported", true);''',
+              '''  jsonBoolFeld(json, first, "historySupported", true);\n  jsonBoolFeld(json, first, "historyOfflineBufferSupported", true);\n  jsonBoolFeld(json, first, "historyOfflineBufferReady", offlineBufferReady);\n  jsonBoolFeld(json, first, "historyOfflineBufferFull", offlineBufferFull);\n  jsonULongFeld(json, first, "historyOfflinePending", offlinePendingCount);\n  jsonULongFeld(json, first, "historyOfflineQueued", offlineQueuedCount);\n  jsonULongFeld(json, first, "historyOfflineReplayed", offlineReplayedCount);\n  jsonULongFeld(json, first, "historyOfflineDropped", offlineDroppedCount);\n  jsonULongFeld(json, first, "historyOfflineCorrupt", offlineCorruptCount);\n  jsonULongFeld(json, first, "historyOfflineFsTotalBytes", (unsigned long)offlineFsTotalBytes);\n  jsonULongFeld(json, first, "historyOfflineFsUsedBytes", (unsigned long)offlineFsUsedBytes);\n  jsonBoolFeld(json, first, "historyOfflinePsramAvailable", offlinePsramAvailable);\n  jsonULongFeld(json, first, "historyOfflinePsramBytes", (unsigned long)offlinePsramBytes);\n  jsonULongFeld(json, first, "historyOfflinePsramCacheRecords", (unsigned long)offlinePsramCacheCount);\n  if (offlineLastError.length() > 0) {\n    jsonText(json, first, "historyOfflineLastError", offlineLastError);\n  }\n  jsonBoolFeld(json, first, "systemCommandsSupported", true);''',
+              'Device Offline Status'
+          )
+
+          core = one(
+              core,
+              'Serial.println("MF35X LIVETRACKER V5.9.11 OTA SIGNED");',
+              'Serial.println("MF35X LIVETRACKER V5.9.12 OTA SIGNED");',
+              'Setup Version'
+          )
+
+          core = one(
+              core,
+              '''  // Erst letzte gueltige Konfiguration laden.\n  lokaleKonfigurationLaden();\n\n  // Ausgang sofort sicher LOW.''',
+              '''  // Erst letzte gueltige Konfiguration laden.\n  lokaleKonfigurationLaden();\n\n  // V5.9.12: Datenpartition + PSRAM pruefen und vorhandenen Rueckstau laden.\n  // Die Funktion kennt noch kein WLAN und veraendert die OTA-Partitionen nicht.\n  offlinePufferInitialisieren();\n\n  // Ausgang sofort sicher LOW.''',
+              'Offline Init'
+          )
+
+          core = one(
+              core,
+              '''  // Rennaufzeichnung nutzt das auf der Admin-Seite eingestellte Intervall.\n  rennhistorieBearbeiten();\n\n  if (WiFi.status() == WL_CONNECTED &&''',
+              '''  // Rennaufzeichnung nutzt das auf der Admin-Seite eingestellte Intervall.\n  rennhistorieBearbeiten();\n\n  // Maximal einen gepufferten Datensatz pro Drain-Zyklus nachsenden.\n  // GPIO10/GPIO11 laufen weiterhin unabhaengig im V5.9.11-Steuerungs-Task.\n  offlineDrainBearbeiten();\n\n  if (WiFi.status() == WL_CONNECTED &&''',
+              'Offline Drain Loop'
+          )
+
+          core = one(
+              core,
+              '''  } else {\n    Serial.println("AUS");\n  }\n\n  Serial.println("--- Firmware / OTA ---");''',
+              '''  } else {\n    Serial.println("AUS");\n  }\n\n  Serial.println("--- Offline-Rennpuffer ---");\n  Serial.print("Puffer: ");\n  Serial.print(offlineBufferReady ? "BEREIT" : "FEHLER");\n  Serial.print(" | pending: ");\n  Serial.print(offlinePendingCount);\n  Serial.print(" | queued/replayed/dropped: ");\n  Serial.print(offlineQueuedCount);\n  Serial.print('/');\n  Serial.print(offlineReplayedCount);\n  Serial.print('/');\n  Serial.println(offlineDroppedCount);\n  Serial.print("Flash: ");\n  Serial.print((unsigned long)offlineFsUsedBytes);\n  Serial.print('/');\n  Serial.print((unsigned long)offlineFsTotalBytes);\n  Serial.print(" Byte | voll: ");\n  Serial.println(offlineBufferFull ? "JA" : "NEIN");\n  Serial.print("PSRAM: ");\n  if (offlinePsramAvailable) {\n    Serial.print((unsigned long)offlinePsramBytes);\n    Serial.print(" Byte | Cache: ");\n    Serial.println((unsigned long)offlinePsramCacheCount);\n  } else {\n    Serial.println("nicht verfuegbar");\n  }\n  if (offlineLastError.length() > 0) {\n    Serial.print("Puffer letzter Fehler: ");\n    Serial.println(offlineLastError);\n  }\n\n  Serial.println("--- Firmware / OTA ---");''',
+              'Serial Offline Status'
+          )
+
+          ver = one(
+              ver,
+              '#define MF35X_FIRMWARE_VERSION "V5.9.11"\n#define MF35X_FIRMWARE_VERSION_CODE 50911UL',
+              '#define MF35X_FIRMWARE_VERSION "V5.9.12"\n#define MF35X_FIRMWARE_VERSION_CODE 50912UL',
+              'Firmware Version Header'
+          )
+
+          ino = one(
+              ino,
+              'MF35X Livetracker V5.9.11 OTA SIGNED - NETZUNABHAENGIGE GPIO11-STEUERUNG',
+              'MF35X Livetracker V5.9.12 OTA SIGNED - OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG',
+              'INO Version'
+          )
+
+          # Freenove N8R8 nutzt OPI-PSRAM. Flash/Partition bleiben bewusst auf dem\n          # bisherigen kompatiblen Schema; nur PSRAM wird fuer den Zusatz-Cache aktiviert.\n          build = one(
+              build,
+              '''          arduino-cli compile \\\n            --fqbn esp32:esp32:esp32s3 \\\n            --output-dir build \\\n            esp32/MF35X_Livetracker''',
+              '''          arduino-cli compile \\\n            --fqbn esp32:esp32:esp32s3 \\\n            --board-options PSRAM=opi \\\n            --output-dir build \\\n            esp32/MF35X_Livetracker''',
+              'PSRAM Build Option'
+          )
+
+          # Expliziten PSRAM-Header aufnehmen; keine Wirkung auf Flash-Partitionierung.\n          buf = one(
+              buf,
+              '#include <esp_system.h>\n#include <stddef.h>',
+              '#include <esp_system.h>\n#include <esp32-hal-psram.h>\n#include <stddef.h>',
+              'PSRAM Include'
+          )
+
+          # Hilfsscans duerfen einen korrupten Eintrag nicht bei jedem Durchlauf neu zaehlen.\n          buf = one(
+              buf,
+              '''    if (!offlineRecordGueltig(rec)) {\n      offlineCorruptCount++;\n      offset += sizeof(rec);\n      continue;\n    }''',
+              '''    if (!offlineRecordGueltig(rec)) {\n      offset += sizeof(rec);\n      continue;\n    }''',
+              'Korrupt Counter stabil'
+          )
+
+          admin_html = admin_html.replace('V9.5.12', 'V9.5.13').replace('v=9.5.12-', 'v=9.5.13-')
+          admin_html = one(
+              admin_html,
+              '''      <span>Aufzeichnung:</span>\n      <strong id="recordingStatus" class="recording-badge">aus</strong>\n    </div>''',
+              '''      <span>Aufzeichnung:</span>\n      <strong id="recordingStatus" class="recording-badge">aus</strong>\n      <span>Offline-Puffer:</span>\n      <strong id="offlineBufferStatus" class="recording-badge recording-badge-wait">noch nicht erkannt</strong>\n    </div>\n    <p id="offlineBufferDetail" class="settings-note settings-note-block">\n      Offline-Pufferstatus wird vom ESP32 geladen.\n    </p>''',
+              'Admin Offline Status HTML'
+          )
+
+          admin_js = one(admin_js, '/* MF35X Tracker Admin V9.5.12 */', '/* MF35X Tracker Admin V9.5.13 */', 'Admin JS Version')
+          admin_js = one(
+              admin_js,
+              'let pendingSystemCommand = null;\n',
+              'let pendingSystemCommand = null;\nlet offlineHistoryPendingCount = 0;\n',
+              'Admin Pending Variable'
+          )
+
+          admin_js = one(
+              admin_js,
+              '''    currentFirmwareVersionCode = Number(device.firmwareVersionCode || 0);\n\n    const firmware = device.firmware || "---";''',
+              '''    currentFirmwareVersionCode = Number(device.firmwareVersionCode || 0);\n    offlineHistoryPendingCount = Number(device.historyOfflinePending || 0);\n\n    const offlineBadge = document.getElementById("offlineBufferStatus");\n    const offlineDetail = document.getElementById("offlineBufferDetail");\n    if (offlineBadge) {\n      const supported = device.historyOfflineBufferSupported === true;\n      const ready = device.historyOfflineBufferReady === true;\n      const full = device.historyOfflineBufferFull === true;\n      const pending = offlineHistoryPendingCount;\n\n      if (!supported) {\n        offlineBadge.textContent = "nicht unterstützt";\n        offlineBadge.className = "recording-badge recording-badge-wait";\n      } else if (!ready) {\n        offlineBadge.textContent = "FEHLER";\n        offlineBadge.className = "recording-badge recording-badge-wait";\n      } else if (full) {\n        offlineBadge.textContent = `VOLL · ${pending} offen`;\n        offlineBadge.className = "recording-badge recording-badge-wait";\n      } else if (pending > 0) {\n        offlineBadge.textContent = `${pending} gepuffert`;\n        offlineBadge.className = "recording-badge recording-badge-on";\n      } else {\n        offlineBadge.textContent = "bereit · 0";\n        offlineBadge.className = "recording-badge recording-badge-on";\n      }\n\n      if (offlineDetail) {\n        const total = Number(device.historyOfflineFsTotalBytes || 0);\n        const used = Number(device.historyOfflineFsUsedBytes || 0);\n        const replayed = Number(device.historyOfflineReplayed || 0);\n        const dropped = Number(device.historyOfflineDropped || 0);\n        const psram = Number(device.historyOfflinePsramBytes || 0);\n        const err = device.historyOfflineLastError ? ` · Fehler: ${device.historyOfflineLastError}` : "";\n        offlineDetail.textContent =\n          `Flash ${(used / 1024).toFixed(0)} / ${(total / 1024).toFixed(0)} KiB` +\n          ` · PSRAM ${psram > 0 ? (psram / 1024 / 1024).toFixed(1) + " MiB" : "nicht aktiv"}` +\n          ` · nachgesendet ${replayed} · verworfen ${dropped}${err}`;\n      }\n    }\n\n    updateAnalysisDeleteButton();\n\n    const firmware = device.firmware || "---";''',
+              'Admin Offline Device Listener'
+          )
+
+          admin_js = one(
+              admin_js,
+              '''  const active = recordingState?.enabled === true && recordingState?.raceId === raceId;\n  analysisDeleteButton.disabled = !raceId || active;\n  analysisDeleteButton.title = active\n    ? "Eine laufende Aufzeichnung muss zuerst gestoppt werden."\n    : "Ausgewählte Rennaufzeichnung vollständig löschen";''',
+              '''  const active = recordingState?.enabled === true && recordingState?.raceId === raceId;\n  const offlinePending = offlineHistoryPendingCount > 0;\n  analysisDeleteButton.disabled = !raceId || active || offlinePending;\n  analysisDeleteButton.title = active\n    ? "Eine laufende Aufzeichnung muss zuerst gestoppt werden."\n    : offlinePending\n      ? "Löschen ist gesperrt, solange der ESP32 noch Offline-Renndaten nachsendet."\n      : "Ausgewählte Rennaufzeichnung vollständig löschen";''',
+              'Delete Schutz bei Offline Queue'
+          )
+
+          core_path.write_text(core)
+          ino_path.write_text(ino)
+          ver_path.write_text(ver)
+          buf_path.write_text(buf)
+          build_path.write_text(build)
+          admin_html_path.write_text(admin_html)
+          admin_js_path.write_text(admin_js)
+          PY
+
+          git diff --check
+          rm .github/workflows/apply-v5912-offline-buffer.yml
+
+          git config user.name "github-actions[bot]"
+          git config user.email "4189826+github-actions[bot]@users.noreply.github.com"
+          git add esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp \
+                  esp32/MF35X_Livetracker/MF35X_Livetracker.ino \
+                  esp32/MF35X_Livetracker/firmware_version.h \
+                  esp32/MF35X_Livetracker/offline_race_buffer.hpp \
+                  .github/workflows/build-firmware.yml \
+                  admin.html admin.js \
+                  .github/workflows/apply-v5912-offline-buffer.yml
+          git commit -m "V5.9.12: add durable offline race buffer"
+          git push origin feature/v5.9.12-offline-race-buffer
