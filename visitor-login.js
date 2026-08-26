@@ -1,4 +1,4 @@
-/* MF35X Besucher-Passwortschutz V9.5.8 – Passwort selbst änderbar */
+/* MF35X Besucher-Passwortschutz V9.6.0 – Passwort selbst änderbar + Web Push */
 
 // =============================================================
 // BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFÜHRUNGSZEICHEN ÄNDERN
@@ -8,6 +8,7 @@ const VISITOR_PASSWORD = "mf35x";
 const SESSION_KEY = "mf35x_visitor_access_v1";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
 const TRACKER_SCRIPT_URL = "./script.js?v=9.5.6";
+const PUSH_CLIENT_URL = "./push-client.js?v=9.6.0";
 
 const loginSection = document.getElementById("visitorLogin");
 const loginForm = document.getElementById("visitorLoginForm");
@@ -46,7 +47,15 @@ loginForm.addEventListener("submit", async event => {
   }
 });
 
-logoutButton.addEventListener("click", () => {
+logoutButton.addEventListener("click", async () => {
+  try {
+    if (typeof window.MF35XPushDisable === "function") {
+      await window.MF35XPushDisable();
+    }
+  } catch (error) {
+    console.warn("Push konnte beim Abmelden nicht vollständig entfernt werden:", error);
+  }
+
   forgetAccess();
   location.reload();
 });
@@ -72,10 +81,16 @@ async function openVisitorApp() {
   try {
     await loadLeaflet();
 
-    // script.js initialisiert Firebase. Der Import erfolgt deshalb bewusst
-    // erst nach erfolgreicher Passwortprüfung.
+    // Die Live-Daten bleiben wie bisher hinter dem Besucherpasswort.
     await import(`${TRACKER_SCRIPT_URL}-${Date.now()}`);
     trackerStarted = true;
+
+    // Web Push wird erst NACH erfolgreichem Besucher-Login initialisiert.
+    // Ein Fehler in der Push-Schicht darf die funktionierende Trackeranzeige
+    // niemals blockieren.
+    import(`${PUSH_CLIENT_URL}-${Date.now()}`).catch(error => {
+      console.warn("Web Push konnte nicht initialisiert werden:", error);
+    });
   } catch (error) {
     visitorApp.hidden = true;
     loginSection.hidden = false;
