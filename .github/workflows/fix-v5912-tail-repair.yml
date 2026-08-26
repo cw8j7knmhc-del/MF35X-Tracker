@@ -1,0 +1,156 @@
+name: Fix V5.9.12 LittleFS tail repair
+
+on:
+  push:
+    branches: [feature/v5.9.12-offline-race-buffer]
+    paths:
+      - '.github/workflows/fix-v5912-tail-repair.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v5.9.12-offline-race-buffer
+          fetch-depth: 0
+
+      - name: Replace unsupported truncate with copy-repair
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('esp32/MF35X_Livetracker/offline_race_buffer.hpp')
+          s = p.read_text()
+          old = '''void offlineUnvollstaendigeDateiEndenReparieren() {
+  if (!offlineBufferReady) return;
+
+  File root = LittleFS.open("/");
+  if (!root) return;
+
+  String pfade[8];
+  size_t groessen[8];
+  size_t anzahl = 0;
+
+  File entry = root.openNextFile();
+  while (entry && anzahl < 8) {
+    String name = entry.name();
+    const size_t size = entry.size();
+    entry.close();
+    if (!name.startsWith("/")) name = "/" + name;
+
+    if (offlineRaceIdAusPfad(name).length() > 0 &&
+        (size % sizeof(OfflineRaceRecord)) != 0) {
+      pfade[anzahl] = name;
+      groessen[anzahl] = size - (size % sizeof(OfflineRaceRecord));
+      anzahl++;
+    }
+    entry = root.openNextFile();
+  }
+  root.close();
+
+  for (size_t i = 0; i < anzahl; ++i) {
+    File file = LittleFS.open(pfade[i], "r+");
+    if (!file) {
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht geoeffnet werden";
+      continue;
+    }
+    if (!file.truncate(groessen[i])) {
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht repariert werden";
+    }
+    file.close();
+  }
+}
+'''
+          new = '''void offlineUnvollstaendigeDateiEndenReparieren() {
+  if (!offlineBufferReady) return;
+
+  File root = LittleFS.open("/");
+  if (!root) return;
+
+  String pfade[8];
+  size_t groessen[8];
+  size_t anzahl = 0;
+
+  File entry = root.openNextFile();
+  while (entry && anzahl < 8) {
+    String name = entry.name();
+    const size_t size = entry.size();
+    entry.close();
+    if (!name.startsWith("/")) name = "/" + name;
+
+    if (offlineRaceIdAusPfad(name).length() > 0 &&
+        (size % sizeof(OfflineRaceRecord)) != 0) {
+      pfade[anzahl] = name;
+      groessen[anzahl] = size - (size % sizeof(OfflineRaceRecord));
+      anzahl++;
+    }
+    entry = root.openNextFile();
+  }
+  root.close();
+
+  uint8_t block[256];
+
+  for (size_t i = 0; i < anzahl; ++i) {
+    const String tempPfad = pfade[i] + ".repair";
+    LittleFS.remove(tempPfad);
+
+    File quelle = LittleFS.open(pfade[i], "r");
+    File ziel = LittleFS.open(tempPfad, "w");
+    if (!quelle || !ziel) {
+      if (quelle) quelle.close();
+      if (ziel) ziel.close();
+      LittleFS.remove(tempPfad);
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht repariert werden";
+      continue;
+    }
+
+    size_t verbleibend = groessen[i];
+    bool ok = true;
+    while (verbleibend > 0) {
+      const size_t teil = verbleibend > sizeof(block) ? sizeof(block) : verbleibend;
+      const size_t gelesen = quelle.read(block, teil);
+      if (gelesen != teil || ziel.write(block, teil) != teil) {
+        ok = false;
+        break;
+      }
+      verbleibend -= teil;
+    }
+
+    ziel.flush();
+    quelle.close();
+    ziel.close();
+
+    if (!ok || verbleibend != 0) {
+      LittleFS.remove(tempPfad);
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht kopiert werden";
+      continue;
+    }
+
+    if (!LittleFS.remove(pfade[i]) || !LittleFS.rename(tempPfad, pfade[i])) {
+      offlineLastError = "Reparierte Queue-Datei konnte nicht aktiviert werden";
+      continue;
+    }
+
+    offlineCorruptCount++;
+  }
+}
+'''
+          if s.count(old) != 1:
+              raise SystemExit(f'Tail repair: erwartet 1 Treffer, gefunden {s.count(old)}')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          git diff --check
+
+      - name: Commit source fix
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add esp32/MF35X_Livetracker/offline_race_buffer.hpp
+          git commit -m "Fix LittleFS power-loss tail repair"
+          git push origin feature/v5.9.12-offline-race-buffer
