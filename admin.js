@@ -76,6 +76,7 @@ let latestOtaManifest = null;
 let pendingSystemCommand = null;
 let offlineHistoryPendingCount = 0;
 let maxValuesDeviceOwned = false;
+let alarmHistoryDeviceOwned = false;
 
 
 // ==================================================
@@ -206,10 +207,7 @@ function initAdmin() {
 
   document.getElementById("resetMaxValues").addEventListener("click", resetMaxValues);
 
-  document.getElementById("clearAlarmHistory").addEventListener("click", async () => {
-    await set(ref(db, "tracker/alarmHistory"), null);
-    alert("Alarmhistorie geleert.");
-  });
+  document.getElementById("clearAlarmHistory").addEventListener("click", clearAlarmHistory);
 }
 
 function listenSystemSupport() {
@@ -223,6 +221,7 @@ function listenSystemSupport() {
     currentFirmwareVersionCode = Number(device.firmwareVersionCode || 0);
     offlineHistoryPendingCount = Number(device.historyOfflinePending || 0);
     maxValuesDeviceOwned = device.maxValuesDeviceOwned === true;
+    alarmHistoryDeviceOwned = device.alarmHistoryDeviceOwned === true;
 
     const offlineBadge = document.getElementById("offlineBufferStatus");
     const offlineDetail = document.getElementById("offlineBufferDetail");
@@ -294,6 +293,7 @@ function listenSystemSupport() {
 
     document.getElementById("restartEsp32").disabled = !systemCommandsSupported;
     document.getElementById("resetMaxValues").disabled = !systemCommandsSupported || !maxValuesDeviceOwned;
+    document.getElementById("clearAlarmHistory").disabled = !systemCommandsSupported || !alarmHistoryDeviceOwned;
     document.getElementById("restartWifi").disabled = !systemCommandsSupported;
     document.getElementById("restartGps").disabled =
       !systemCommandsSupported || !gpsSoftwareRestartSupported;
@@ -399,7 +399,7 @@ function listenSystemCommands() {
         `${pendingSystemCommand.label}: Befehl gesendet – wartet auf ESP32.`,
         "pending"
       );
-    } else if (["checking", "downloading", "verifying", "restarting"].includes(state.status)) {
+    } else if (["checking", "downloading", "verifying", "restarting", "resetting", "clearing"].includes(state.status)) {
       setSystemCommandStatus(
         `${pendingSystemCommand.label}: ${state.status}${detail}`,
         "pending"
@@ -915,6 +915,19 @@ async function resetMaxValues() {
     "max_values_reset",
     "Maximalwerte zurücksetzen",
     "Maximalwerte wirklich zurücksetzen? Der ESP32 beginnt danach sofort mit einer neuen Erfassung."
+  );
+}
+
+async function clearAlarmHistory() {
+  if (!systemCommandsSupported || !alarmHistoryDeviceOwned) {
+    alert("Die Alarmhistorie wird erst ab der ESP32-Firmware V5.9.13 zentral vom Gerät verwaltet.");
+    return;
+  }
+
+  await sendSystemCommand(
+    "alarm_history_clear",
+    "Alarmhistorie leeren",
+    "Alarmhistorie wirklich leeren? Noch lokal gepufferte Alarmereignisse werden dabei ebenfalls gelöscht."
   );
 }
 

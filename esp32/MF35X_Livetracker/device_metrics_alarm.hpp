@@ -109,6 +109,7 @@ unsigned long deviceAlarmLastDrainAttemptMs = 0;
 unsigned long deviceAlarmDrainWaitMs = DEVICE_ALARM_DRAIN_OK_INTERVAL_MS;
 String deviceAlarmLastError = "";
 String deviceLastMaxResetCommandId = "";
+String deviceLastAlarmClearCommandId = "";
 
 bool deviceFloatBesserMax(float candidate, float current, bool valid) {
   return isfinite(candidate) && (!valid || candidate > current);
@@ -132,6 +133,7 @@ void deviceMaxLaden() {
   deviceAlarmSequence = preferences.getULong("alarm_seq", 0UL);
   deviceAlarmActiveMask = (uint16_t)preferences.getUInt("alarm_mask", 0U);
   deviceLastMaxResetCommandId = preferences.getString("cmd_max", "");
+  deviceLastAlarmClearCommandId = preferences.getString("cmd_ahclr", "");
 
   if ((deviceMaxValues.validMask & DEVICE_MAX_SPEED_VALID) && !isfinite(deviceMaxValues.maxSpeed)) deviceMaxValues.validMask &= ~DEVICE_MAX_SPEED_VALID;
   if ((deviceMaxValues.validMask & DEVICE_MAX_RPM_VALID) && !isfinite(deviceMaxValues.maxRpm)) deviceMaxValues.validMask &= ~DEVICE_MAX_RPM_VALID;
@@ -778,17 +780,62 @@ void deviceDerivedDataBearbeiten() {
   deviceAlarmDrainBearbeiten();
 }
 
+bool deviceAlarmHistorieLeeren() {
+  // Erst den lokalen Rueckstau entfernen. Damit koennen geloeschte Alarme
+  // spaeter nicht erneut aus LittleFS nach Firebase zurueckkehren.
+  if (deviceAlarmQueueReady) {
+    LittleFS.remove(DEVICE_ALARM_QUEUE_PATH);
+    LittleFS.remove(DEVICE_ALARM_QUEUE_REPAIR_PATH);
+    deviceAlarmPendingCount = 0;
+    deviceAlarmLastError = "";
+    offlineFsStatusAktualisieren();
+  }
+
+  // Aktive Alarmzustaende bleiben bewusst erhalten. Ein gerade anstehender
+  // Alarm wird durch "Historie leeren" nicht kuenstlich als neues Ereignis erzeugt.
+  return WiFi.status() == WL_CONNECTED &&
+         firebasePut("tracker/alarmHistory", "null");
+}
+
 void deviceDerivedDataCommandBearbeiten(const String& commandsJson) {
   String requestId;
   String status;
 
-  if (!commandAusObjektLesen(commandsJson, "max_values_reset", requestId, status)) return;
-  if (requestId == deviceLastMaxResetCommandId) return;
+  if (commandAusObjektLesen(commandsJson, "max_values_reset", requestId, status) &&
+      requestId != deviceLastMaxResetCommandId) {
+    deviceLastMaxResetCommandId = requestId;
+    if (preferencesOk) preferences.putString("cmd_max", requestId);
 
-  deviceLastMaxResetCommandId = requestId;
-  if (preferencesOk) preferences.putString("cmd_max", requestId);
+    commandStatusSenden("max_values_reset", requestId, "resetting");
+    deviceMaxReset();
+    commandStatusSenden(
+      "max_values_reset",
+      requestId,
+      "completed",
+      "Maximalwerte vom ESP32 neu gestartet."
+    );
+  }
 
-  commandStatusSenden("max_values_reset", requestId, "resetting");
-  deviceMaxReset();
-  commandStatusSenden("max_values_reset", requestId, "completed", "Maximalwerte vom ESP32 neu gestartet.");
+  if (commandAusObjektLesen(commandsJson, "alarm_history_clear", requestId, status) &&
+      requestId != deviceLastAlarmClearCommandId) {
+    deviceLastAlarmClearCommandId = requestId;
+    if (preferencesOk) preferences.putString("cmd_ahclr", requestId);
+
+    commandStatusSenden("alarm_history_clear", requestId, "clearing");
+    if (deviceAlarmHistorieLeeren()) {
+      commandStatusSenden(
+        "alarm_history_clear",
+        requestId,
+        "completed",
+        "Alarmhistorie und lokaler Alarm-Rueckstau geloescht."
+      );
+    } else {
+      commandStatusSenden(
+        "alarm_history_clear",
+        requestId,
+        "error",
+        "Alarmhistorie konnte nicht vollstaendig geloescht werden."
+      );
+    }
+  }
 }
