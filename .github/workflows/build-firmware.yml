@@ -1,6 +1,5 @@
 name: Build signed MF35X firmware
 
-# One-shot manual rebuild trigger for V5.9.11; no build logic changed.
 on:
   workflow_dispatch:
   push:
