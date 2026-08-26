@@ -1,9 +1,38 @@
 /*
-  MF35X Livetracker V5.9.13 OTA SIGNED - OFFLINE-RENNSPEICHER + NETZUNABHAENGIGE GPIO11-STEUERUNG
+  MF35X Livetracker V5.9.15 OTA SIGNED
+  - stabilisierte Drehzahlauswertung am W-Anschluss
+  - schnelle GPIO11-Steuerung bleibt netzunabhaengig
 
   Diese .ino-Datei bleibt absichtlich minimal.
   Der eigentliche Tracker-Code liegt in MF35X_Livetracker_core.hpp.
-  Dadurch kann der Arduino-.ino-Praeprozessor keine automatisch erzeugten
-  Funktionsprototypen mit falschem C/C++-Linkage erzeugen.
 */
+
+// Die Core-Abhaengigkeiten vorab laden. Dadurch kann direkt vor dem Core-Include
+// nur der eine setup()-Aufruf von attachInterrupt gezielt umgeleitet werden,
+// ohne Deklarationen aus Arduino-/Bibliotheks-Headern zu beeinflussen.
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPClient.h>
+#include <TinyGPS++.h>
+#include <Wire.h>
+#include <Adafruit_ADS1X15.h>
+#include <Adafruit_MAX31855.h>
+#include <Preferences.h>
+#include <Update.h>
+#include <esp_ota_ops.h>
+#include <limits.h>
+#include "firmware_version.h"
+#include "ota_public_key.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
+
+void mf35xAttachStableRpmInterrupt(int pin, int mode);
+
+#define attachInterrupt(pin, func, mode) \
+  mf35xAttachStableRpmInterrupt((pin), (mode))
 #include "MF35X_Livetracker_core.hpp"
+#undef attachInterrupt
+
+#include "rpm_stable_override.hpp"
