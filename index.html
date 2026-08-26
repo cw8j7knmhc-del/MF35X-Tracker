@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>MF35X Live Tracker V9.5.8</title>
+  <title>MF35X Live Tracker V9.5.12 Push</title>
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
@@ -179,7 +179,7 @@
         <img src="tractor.png" class="title-tractor" alt="">
         MF35X Live Tracker
       </div>
-      <div class="version">Version 9.5.8 · Besucheransicht</div>
+      <div class="version">Version 9.5.12 · Besucheransicht</div>
     </header>
 
     <main>
@@ -323,11 +323,17 @@
           <i class="fa-solid fa-bell"></i> Browser erlauben
         </button>
         <label class="switch-row">
-          <span>Benachrichtigungen</span>
+          <span>Alarm-Benachrichtigungen</span>
           <input id="notificationToggle" type="checkbox">
           <span class="slider"></span>
         </label>
         <span id="notifyStatus">Aus</span>
+        <label class="switch-row">
+          <span>ESP32 Online/Offline Push</span>
+          <input id="backgroundPushToggle" type="checkbox">
+          <span class="slider"></span>
+        </label>
+        <span id="backgroundPushStatus">Noch nicht eingerichtet</span>
         <a class="admin-link" href="admin.html">Admin</a>
       </section>
     </main>
@@ -335,7 +341,10 @@
 
   <script type="module">
     // Frische Passwortdatei laden, damit eine Änderung auf GitHub sofort gilt.
-    import(`./visitor-login.js?v=9.5.8-${Date.now()}`);
+    import(`./visitor-login.js?v=9.5.12-${Date.now()}`);
+    // Echter Hintergrund-Push wird getrennt initialisiert. Ohne konfigurierten
+    // VAPID-Schluessel bleibt der Schalter sicher deaktiviert.
+    import(`./push-client.js?v=9.5.12-${Date.now()}`);
   </script>
 </body>
 </html>
