@@ -1,7 +1,7 @@
-/* MF35X Besucher-Passwortschutz V9.5.8 – Passwort selbst änderbar */
+/* MF35X Besucher-Passwortschutz V9.5.9 – Hintergrundueberwachung nach altem Verhalten */
 
 // =============================================================
-// BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFÜHRUNGSZEICHEN ÄNDERN
+// BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFUEHRUNGSZEICHEN AENDERN
 // =============================================================
 const VISITOR_PASSWORD = "mf35x";
 
@@ -18,12 +18,28 @@ const visitorApp = document.getElementById("visitorApp");
 const logoutButton = document.getElementById("visitorLogout");
 
 let trackerStarted = false;
+let trackerStartPromise = null;
+
+/*
+ * WICHTIG:
+ * Die Tracker-/Firebase-Logik wird wieder sofort beim Start der PWA geladen,
+ * so wie vor Einbau des Besucherpassworts. Die eigentliche Besucheroberflaeche
+ * bleibt trotzdem verborgen, bis das korrekte Passwort eingegeben wurde.
+ *
+ * Damit kann die bereits vorhandene Alarm-/Benachrichtigungslogik waehrend
+ * derselben PWA-Sitzung weiterlaufen. Das ist bewusst KEIN echter Web-Push;
+ * wenn iOS die PWA vollstaendig suspendiert/beendet, kann JavaScript nicht
+ * garantiert weiterlaufen.
+ */
+startTrackerInBackground().catch(error => {
+  console.error("Tracker-Hintergrundstart fehlgeschlagen:", error);
+});
 
 loginForm.addEventListener("submit", async event => {
   event.preventDefault();
   loginError.textContent = "";
   loginButton.disabled = true;
-  loginButton.textContent = "Passwort wird geprüft...";
+  loginButton.textContent = "Passwort wird geprueft...";
 
   try {
     if (passwordInput.value !== VISITOR_PASSWORD) {
@@ -39,10 +55,9 @@ loginForm.addEventListener("submit", async event => {
     console.error("Besucher-Anmeldung fehlgeschlagen:", error);
     loginError.textContent = "Anmeldung fehlgeschlagen. Bitte Seite neu laden.";
   } finally {
-    if (!trackerStarted) {
-      loginButton.disabled = false;
-      loginButton.textContent = "Besucheransicht öffnen";
-    }
+    if (!visitorApp.hidden) return;
+    loginButton.disabled = false;
+    loginButton.textContent = "Besucheransicht oeffnen";
   }
 });
 
@@ -61,21 +76,39 @@ if (hasRememberedAccess()) {
   passwordInput.focus();
 }
 
-async function openVisitorApp() {
+async function startTrackerInBackground() {
   if (trackerStarted) return;
+  if (trackerStartPromise) return trackerStartPromise;
 
-  loginButton.disabled = true;
-  loginButton.textContent = "Live-Daten werden geladen...";
-  loginSection.hidden = true;
-  visitorApp.hidden = false;
-
-  try {
+  trackerStartPromise = (async () => {
     await loadLeaflet();
-
-    // script.js initialisiert Firebase. Der Import erfolgt deshalb bewusst
-    // erst nach erfolgreicher Passwortprüfung.
     await import(`${TRACKER_SCRIPT_URL}-${Date.now()}`);
     trackerStarted = true;
+  })();
+
+  try {
+    await trackerStartPromise;
+  } finally {
+    trackerStartPromise = null;
+  }
+}
+
+async function openVisitorApp() {
+  loginButton.disabled = true;
+  loginButton.textContent = "Live-Daten werden geladen...";
+
+  try {
+    await startTrackerInBackground();
+
+    loginSection.hidden = true;
+    visitorApp.hidden = false;
+
+    // Leaflet wurde eventuell initialisiert, waehrend die Karte verborgen war.
+    // Ein Resize nach dem Einblenden sorgt dafuer, dass die Karte korrekt zeichnet.
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new Event("resize"));
+      setTimeout(() => window.dispatchEvent(new Event("resize")), 250);
+    });
   } catch (error) {
     visitorApp.hidden = true;
     loginSection.hidden = false;
@@ -87,9 +120,21 @@ function loadLeaflet() {
   if (window.L) return Promise.resolve();
 
   return new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-mf35x-leaflet="1"]');
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("Leaflet konnte nicht geladen werden.")),
+        { once: true }
+      );
+      return;
+    }
+
     const script = document.createElement("script");
     script.src = LEAFLET_SCRIPT_URL;
     script.async = true;
+    script.dataset.mf35xLeaflet = "1";
     script.onload = resolve;
     script.onerror = () => reject(new Error("Leaflet konnte nicht geladen werden."));
     document.head.appendChild(script);
@@ -125,7 +170,7 @@ function showLoginError(message) {
   loginSection.hidden = false;
   loginError.textContent = message;
   loginButton.disabled = false;
-  loginButton.textContent = "Besucheransicht öffnen";
+  loginButton.textContent = "Besucheransicht oeffnen";
   passwordInput.value = "";
   passwordInput.focus();
 }
