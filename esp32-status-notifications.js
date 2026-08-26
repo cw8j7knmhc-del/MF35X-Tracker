@@ -1,4 +1,4 @@
-/* MF35X Tracker – kostenlose ESP32 Online/Offline Browser-Benachrichtigung */
+/* MF35X Tracker – kostenlose ESP32 Online/Offline Browser-Benachrichtigung · nur Admin */
 import { getApps, getApp, initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -14,10 +14,17 @@ let liveSnapshotSeen = false;
 let stateInitialized = false;
 let lastOnlineState = null;
 
+const adminContent = document.getElementById("adminContent");
+
+// Diese Funktion darf ausschliesslich auf der Admin-Seite laufen.
+if (!adminContent) {
+  throw new Error("ESP32-Statusbenachrichtigung ist nur fuer den Admin-Bereich vorgesehen.");
+}
+
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-setupEsp32NotificationSwitch();
+setupAdminNotificationSection();
 
 onValue(ref(db, "tracker/device"), snapshot => {
   const device = snapshot.val() || {};
@@ -45,7 +52,7 @@ setInterval(evaluateEsp32State, 250);
 
 function evaluateEsp32State() {
   // Erst nach dem ersten echten Firebase-Live-Snapshot einen Ausgangszustand festlegen.
-  // So entsteht beim bloßen Öffnen/Neuladen der Seite keine Online-/Offline-Meldung.
+  // So entsteht beim Oeffnen/Neuladen der Admin-Seite keine Online-/Offline-Meldung.
   if (!liveSnapshotSeen) return;
 
   const online =
@@ -69,32 +76,39 @@ function evaluateEsp32State() {
   }
 }
 
-function setupEsp32NotificationSwitch() {
-  const panel = document.querySelector(".notify-panel");
-  if (!panel || document.getElementById("esp32StatusNotificationToggle")) return;
+function setupAdminNotificationSection() {
+  if (document.getElementById("esp32NotificationSettings")) return;
 
-  const label = document.createElement("label");
-  label.className = "switch-row";
-  label.innerHTML = `
-    <span>ESP32 Online/Offline</span>
-    <input id="esp32StatusNotificationToggle" type="checkbox">
-    <span class="slider"></span>
+  const section = document.createElement("section");
+  section.id = "esp32NotificationSettings";
+  section.className = "settings admin-settings";
+  section.innerHTML = `
+    <h2>Benachrichtigungen</h2>
+    <p class="settings-note settings-note-block">
+      Diese Einstellung ist nur im Admin-Bereich sichtbar. Bei aktiviertem Schalter meldet
+      dieser Browser bzw. diese PWA einen echten Zustandswechsel des ESP32 auf Offline oder Online.
+      Es werden keine Cloud Functions und kein kostenpflichtiger Firebase-Tarif verwendet.
+    </p>
+    <div class="settings-actions">
+      <label class="switch-row">
+        <span>ESP32 Online/Offline</span>
+        <input id="esp32StatusNotificationToggle" type="checkbox">
+        <span class="slider"></span>
+      </label>
+      <span id="esp32StatusNotifyStatus" class="config-status">Aus</span>
+    </div>
   `;
 
-  const status = document.createElement("span");
-  status.id = "esp32StatusNotifyStatus";
-  status.textContent = "Aus";
-
-  const adminLink = panel.querySelector(".admin-link");
-  if (adminLink) {
-    panel.insertBefore(label, adminLink);
-    panel.insertBefore(status, adminLink);
+  const firstSettings = adminContent.querySelector(".settings.admin-settings");
+  if (firstSettings) {
+    firstSettings.insertAdjacentElement("afterend", section);
   } else {
-    panel.appendChild(label);
-    panel.appendChild(status);
+    adminContent.appendChild(section);
   }
 
-  const toggle = label.querySelector("input");
+  const toggle = document.getElementById("esp32StatusNotificationToggle");
+  const status = document.getElementById("esp32StatusNotifyStatus");
+
   toggle.checked = localStorage.getItem(STORAGE_KEY) === "true";
 
   if (!("Notification" in window)) {
@@ -104,8 +118,8 @@ function setupEsp32NotificationSwitch() {
     return;
   }
 
-  // Falls die Browserfreigabe entzogen wurde, kann der gespeicherte Schalter
-  // nicht mehr aktiv bleiben.
+  // Wurde die Browserfreigabe spaeter entzogen, darf der Schalter nicht weiter
+  // scheinbar aktiv bleiben.
   if (toggle.checked && Notification.permission !== "granted") {
     toggle.checked = false;
     localStorage.setItem(STORAGE_KEY, "false");
@@ -126,7 +140,13 @@ function setupEsp32NotificationSwitch() {
   });
 
   function updateStatusText() {
-    status.textContent = toggle.checked ? "Ein" : "Aus";
+    if (toggle.checked) {
+      status.textContent = "Ein – Zustandswechsel werden gemeldet";
+    } else if (Notification.permission === "denied") {
+      status.textContent = "Aus – Browser-Benachrichtigungen blockiert";
+    } else {
+      status.textContent = "Aus";
+    }
   }
 }
 
