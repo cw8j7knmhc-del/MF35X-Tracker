@@ -364,16 +364,51 @@ void offlineUnvollstaendigeDateiEndenReparieren() {
   }
   root.close();
 
+  uint8_t block[256];
+
   for (size_t i = 0; i < anzahl; ++i) {
-    File file = LittleFS.open(pfade[i], "r+");
-    if (!file) {
-      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht geoeffnet werden";
+    const String tempPfad = pfade[i] + ".repair";
+    LittleFS.remove(tempPfad);
+
+    File quelle = LittleFS.open(pfade[i], "r");
+    File ziel = LittleFS.open(tempPfad, "w");
+    if (!quelle || !ziel) {
+      if (quelle) quelle.close();
+      if (ziel) ziel.close();
+      LittleFS.remove(tempPfad);
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht repariert werden";
       continue;
     }
-    if (!file.truncate(groessen[i])) {
-      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht repariert werden";
+
+    size_t verbleibend = groessen[i];
+    bool ok = true;
+    while (verbleibend > 0) {
+      const size_t teil = verbleibend > sizeof(block) ? sizeof(block) : verbleibend;
+      const size_t gelesen = quelle.read(block, teil);
+      if (gelesen != teil || ziel.write(block, teil) != teil) {
+        ok = false;
+        break;
+      }
+      verbleibend -= teil;
     }
-    file.close();
+
+    ziel.flush();
+    quelle.close();
+    ziel.close();
+
+    if (!ok || verbleibend != 0) {
+      LittleFS.remove(tempPfad);
+      offlineLastError = "Unvollstaendiges Queue-Dateiende konnte nicht kopiert werden";
+      continue;
+    }
+
+    // Erst wenn die Reparaturdatei komplett geschrieben ist, das Original ersetzen.
+    if (!LittleFS.remove(pfade[i]) || !LittleFS.rename(tempPfad, pfade[i])) {
+      offlineLastError = "Reparierte Queue-Datei konnte nicht aktiviert werden";
+      continue;
+    }
+
+    offlineCorruptCount++;
   }
 }
 
