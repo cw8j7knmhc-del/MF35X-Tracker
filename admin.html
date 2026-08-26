@@ -6,14 +6,14 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>MF35X Admin V9.5.9</title>
+  <title>MF35X Admin V9.5.10</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
   <link rel="stylesheet" href="style.css?v=9.5.9">
 </head>
 <body>
 <header>
   <div class="title"><img src="tractor.png" class="title-tractor">MF35X Tracker Admin</div>
-  <div class="version">Version 9.5.9</div>
+  <div class="version">Version 9.5.10</div>
 </header>
 
 <main>
@@ -91,6 +91,12 @@
 
   <section class="settings admin-settings">
     <h2>Externer High/Low-Ausgang</h2>
+
+    <div class="recording-status-row">
+      <span>GPIO11 Ausgang:</span>
+      <strong id="externalOutputLiveStatus" class="recording-badge recording-badge-wait">wird geladen</strong>
+      <span id="externalOutputLiveDetail" class="config-status">Warte auf ESP32-Daten.</span>
+    </div>
 
     <div class="settings-grid">
       <label>
@@ -350,7 +356,68 @@
 <script type="module">
   // Bei jedem Aufruf eine frische admin.js laden. Dadurch wird eine Änderung
   // des Passworts nicht mehr durch eine alte Browser-/GitHub-Cachedatei verdeckt.
-  import(`./admin.js?v=9.5.9-${Date.now()}`);
+  await import(`./admin.js?v=9.5.10-${Date.now()}`);
+
+  // Live-Anzeige des externen GPIO11-Ausgangs. Der ESP32 sendet den tatsächlichen
+  // Schaltzustand bereits als tracker/live/switch_output. Keine Firmwareänderung nötig.
+  const { getApps, getApp, initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
+  const { getDatabase, ref, onValue } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+  const { firebaseConfig } = await import(`./firebase-config.js?v=9.5.10-${Date.now()}`);
+
+  const outputApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  const outputDb = getDatabase(outputApp);
+  const outputBadge = document.getElementById("externalOutputLiveStatus");
+  const outputDetail = document.getElementById("externalOutputLiveDetail");
+
+  let lastOutputState = null;
+  let lastOutputTimestamp = 0;
+  const OUTPUT_OFFLINE_AFTER_MS = 5000;
+
+  function renderExternalOutputStatus() {
+    if (!outputBadge || !outputDetail) return;
+
+    const fresh = lastOutputTimestamp > 0 &&
+      (Date.now() - lastOutputTimestamp) <= OUTPUT_OFFLINE_AFTER_MS;
+
+    outputBadge.className = "recording-badge";
+
+    if (fresh && lastOutputState === true) {
+      outputBadge.textContent = "AKTIV / HIGH";
+      outputBadge.classList.add("recording-badge-on");
+      outputDetail.textContent = "GPIO11 ist aktuell eingeschaltet.";
+      return;
+    }
+
+    if (fresh && lastOutputState === false) {
+      outputBadge.textContent = "INAKTIV / LOW";
+      outputBadge.classList.add("recording-badge-wait");
+      outputDetail.textContent = "GPIO11 ist aktuell ausgeschaltet.";
+      return;
+    }
+
+    outputBadge.classList.add("recording-badge-wait");
+    if (lastOutputState === true) {
+      outputBadge.textContent = "OFFLINE – zuletzt HIGH";
+      outputDetail.textContent = "Keine aktuellen ESP32-Daten. Letzter gemeldeter Zustand: AKTIV / HIGH.";
+    } else if (lastOutputState === false) {
+      outputBadge.textContent = "OFFLINE – zuletzt LOW";
+      outputDetail.textContent = "Keine aktuellen ESP32-Daten. Letzter gemeldeter Zustand: INAKTIV / LOW.";
+    } else {
+      outputBadge.textContent = "KEINE DATEN";
+      outputDetail.textContent = "Noch kein Ausgangszustand vom ESP32 empfangen.";
+    }
+  }
+
+  onValue(ref(outputDb, "tracker/live"), snapshot => {
+    const live = snapshot.val() || {};
+    if (typeof live.switch_output === "boolean") {
+      lastOutputState = live.switch_output;
+    }
+    lastOutputTimestamp = Number(live.timestamp || 0);
+    renderExternalOutputStatus();
+  });
+
+  setInterval(renderExternalOutputStatus, 1000);
 </script>
 </body>
 </html>
