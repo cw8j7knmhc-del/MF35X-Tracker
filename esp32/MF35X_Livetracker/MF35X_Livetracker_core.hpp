@@ -16,13 +16,13 @@
 #include <freertos/semphr.h>
 
 // ==================================================
-// MF35X LIVETRACKER V5.9.9 OTA SIGNED - FIX2 BUILDSTRUKTUR
+// MF35X LIVETRACKER V5.9.10 OTA SIGNED - GPS FIX REFERENZSTAND
 // GPS + OELTEMP + OELDRUCK + BATTERIE + ZYLINDERTEMP
 // + DREHZAHL + SCHALTAUSGANG + FIREBASE-KONFIGURATION
 // + DYNAMISCHE UPDATEINTERVALLE + RENNHISTORIE
 // + ADMIN-SYSTEMBEFEHLE: ESP32 / WLAN / GPS NEUSTART
 // + ROBUSTER GPS-EMPFANG: 4-KB-UART-PUFFER + EIGENER FREERTOS-TASK
-// + GPS 10 HZ SICHER: KEINE BAUD-UMSCHALTUNG, RMC 10 HZ + GGA ~1 HZ
+// + GPS 10 HZ FIX: KEINE BAUD-UMSCHALTUNG, RMC 10 HZ + GGA ~1,1 HZ + RATEN-DIAGNOSE
 // + SIGNIERTES HTTPS-OTA + AUTOMATISCHER ROLLBACK-SCHUTZ
 // ==================================================
 
@@ -121,23 +121,34 @@ constexpr uint32_t GPS_BAUD_MIN_GUELTIGE_SAETZE = 2UL;
 uint32_t gpsBaudAktiv = GPS_BAUD_BEVORZUGT;
 bool gpsBaudErkannt = false;
 
-// V5.9.7: 10-Hz-Konfiguration OHNE Baudratenwechsel.
-// Der funktionierende, automatisch erkannte UART-Takt bleibt unangetastet.
-// Bei 9600 Baud wird die NMEA-Last bewusst reduziert:
-// RMC bei jedem Fix (10 Hz), GGA nur bei jedem 9. Fix (~1,1 Hz).
-// So bleiben schnelle Position/Geschwindigkeit sowie Satelliten/HDOP erhalten.
+// V5.9.10 GPS-Fix: 10-Hz-Konfiguration OHNE Baudratenwechsel.
+// Der automatisch erkannte UART-Takt bleibt unangetastet.
+// Die NMEA-Last wird bewusst reduziert:
+// RMC bei jedem Fix (10 Hz), GGA bei jedem 9. Fix (~1,1 Hz).
+//
+// ATGM336H/CASIC-Firmware existiert mit unterschiedlichen PCAS03-Formaten.
+// Deshalb werden die bekannten Formate von alt nach neu gesendet.
+// Ein Empfaenger uebernimmt die von seiner Firmware verstandene Variante;
+// die Baudrate wird dabei zu keinem Zeitpunkt veraendert.
 constexpr uint32_t GPS_ZIELRATE_HZ = 10UL;
-const char* GPS_CMD_NMEA_RMC10_GGA_SLOW =
+const char* GPS_CMD_NMEA_LEGACY_8 =
   "$PCAS03,9,0,0,0,1,0,0,0*0A\r\n";
+const char* GPS_CMD_NMEA_EXTENDED_14 =
+  "$PCAS03,9,0,0,0,1,0,0,0,0,0,,,0,0*0A\r\n";
+const char* GPS_CMD_NMEA_FULL_19 =
+  "$PCAS03,9,0,0,0,1,0,0,0,0,0,,,0,0,,,,0*3A\r\n";
 const char* GPS_CMD_RATE_10HZ =
   "$PCAS02,100*1E\r\n";
 
 bool gps10HzAngefordert = false;
 volatile uint32_t gpsRmcSaetzeGesamt = 0;
+volatile uint32_t gpsGgaSaetzeGesamt = 0;
 float gpsRmcRateHz = NAN;
+float gpsGgaRateHz = NAN;
 bool gps10HzBestaetigt = false;
 unsigned long gpsRmcMessungLetzteMs = 0;
 uint32_t gpsRmcMessungLetzterZaehler = 0;
+uint32_t gpsGgaMessungLetzterZaehler = 0;
 
 
 constexpr size_t GPS_UART_RX_BUFFER_SIZE = 4096;
@@ -313,7 +324,7 @@ constexpr float OEL_CAL_T2 = 35.0f;
 
 // Einpunkt-Korrektur bei nebeneinanderliegenden Sensoren:
 // Oeltemperatur zeigte 39 C, MAX31855 zeigte 29 C.
-constexpr float OEL_TEMP_OFFSET = -10.0f;
+constexpr float OEL_TEMP_OFFSET = 4.0f;
 
 float oilVoltage = NAN;
 float oilSensorOhm = NAN;
@@ -450,7 +461,7 @@ void gpsUartAufAktiveBaudSetzen();
 void gpsBaudAutomatischErkennen();
 void gpsBefehlSenden(const char* befehl);
 bool gps10HzSicherKonfigurieren();
-void gpsRmcSatzErfassen(char zeichen, bool& aktuellerSatzRmc);
+void gpsNmeaSatzTypErfassen(char zeichen, bool& aktuellerSatzRmc, bool& aktuellerSatzGga);
 void gpsRmcRateAktualisieren();
 void gpsParserSnapshotAktualisieren();
 void gpsZeichenEinlesen();
@@ -1341,8 +1352,11 @@ bool gps10HzSicherKonfigurieren() {
   gps10HzAngefordert = false;
   gps10HzBestaetigt = false;
   gpsRmcRateHz = NAN;
+  gpsGgaRateHz = NAN;
   gpsRmcSaetzeGesamt = 0;
+  gpsGgaSaetzeGesamt = 0;
   gpsRmcMessungLetzterZaehler = 0;
+  gpsGgaMessungLetzterZaehler = 0;
   gpsRmcMessungLetzteMs = millis();
 
   if (!gpsBaudErkannt) {
@@ -1354,9 +1368,14 @@ bool gps10HzSicherKonfigurieren() {
   Serial.print(gpsBaudAktiv);
   Serial.println(" Baud ...");
 
-  // Zuerst Datenlast reduzieren, solange das Modul noch mit seiner
-  // bisherigen (typisch 1-Hz-)Rate sendet.
-  gpsBefehlSenden(GPS_CMD_NMEA_RMC10_GGA_SLOW);
+  // Zuerst die NMEA-Ausgabe konfigurieren.
+  // CASIC hat PCAS03 ueber die Jahre erweitert. Die Varianten werden
+  // bewusst von alt nach neu gesendet, ohne irgendeinen Baud-Befehl.
+  gpsBefehlSenden(GPS_CMD_NMEA_LEGACY_8);
+  delay(120);
+  gpsBefehlSenden(GPS_CMD_NMEA_EXTENDED_14);
+  delay(120);
+  gpsBefehlSenden(GPS_CMD_NMEA_FULL_19);
   delay(300);
 
   // Danach die eigentliche Positionierungsrate auf 100 ms = 10 Hz setzen.
@@ -1368,21 +1387,27 @@ bool gps10HzSicherKonfigurieren() {
   gps10HzAngefordert = true;
 
   Serial.println("GPS 10 Hz: Befehl gesendet.");
-  Serial.println("GPS NMEA: RMC 10 Hz + GGA ca. 1,1 Hz (bandbreitensicher).");
+  Serial.println("GPS NMEA: RMC 10 Hz + GGA ca. 1,1 Hz (PCAS03 8/14/19 kompatibel).");
   Serial.println("GPS Baud bleibt unveraendert.");
   return true;
 }
 
 // Ermittelt den Satztyp der gerade eingelesenen NMEA-Zeile.
-// Der RMC-Zaehler wird erst dann erhoeht, wenn TinyGPS++ die Checksumme
-// dieses Satzes als gueltig akzeptiert hat.
-void gpsRmcSatzErfassen(char zeichen, bool& aktuellerSatzRmc) {
+// Die Zaehler werden erst erhoeht, wenn TinyGPS++ die Checksumme
+// des jeweiligen Satzes als gueltig akzeptiert hat.
+// Die Talker-ID (z. B. GP/GN/BD) ist dabei egal.
+void gpsNmeaSatzTypErfassen(
+  char zeichen,
+  bool& aktuellerSatzRmc,
+  bool& aktuellerSatzGga
+) {
   static char header[6] = {0};
   static uint8_t pos = 0;
 
   if (zeichen == '$') {
     pos = 0;
     aktuellerSatzRmc = false;
+    aktuellerSatzGga = false;
     return;
   }
 
@@ -1390,10 +1415,16 @@ void gpsRmcSatzErfassen(char zeichen, bool& aktuellerSatzRmc) {
     header[pos++] = zeichen;
     if (pos == 5) {
       header[5] = '\0';
+
       aktuellerSatzRmc =
         header[2] == 'R' &&
         header[3] == 'M' &&
         header[4] == 'C';
+
+      aktuellerSatzGga =
+        header[2] == 'G' &&
+        header[3] == 'G' &&
+        header[4] == 'A';
     }
   }
 }
@@ -1404,17 +1435,24 @@ void gpsRmcRateAktualisieren() {
   if (gpsRmcMessungLetzteMs == 0) {
     gpsRmcMessungLetzteMs = jetzt;
     gpsRmcMessungLetzterZaehler = gpsRmcSaetzeGesamt;
+    gpsGgaMessungLetzterZaehler = gpsGgaSaetzeGesamt;
     return;
   }
 
   unsigned long dt = (unsigned long)(jetzt - gpsRmcMessungLetzteMs);
   if (dt < 2000UL) return;
 
-  uint32_t aktuell = gpsRmcSaetzeGesamt;
-  uint32_t delta = aktuell - gpsRmcMessungLetzterZaehler;
+  uint32_t rmcAktuell = gpsRmcSaetzeGesamt;
+  uint32_t ggaAktuell = gpsGgaSaetzeGesamt;
+  uint32_t rmcDelta = rmcAktuell - gpsRmcMessungLetzterZaehler;
+  uint32_t ggaDelta = ggaAktuell - gpsGgaMessungLetzterZaehler;
 
   gpsRmcRateHz = (dt > 0)
-    ? ((float)delta * 1000.0f / (float)dt)
+    ? ((float)rmcDelta * 1000.0f / (float)dt)
+    : NAN;
+
+  gpsGgaRateHz = (dt > 0)
+    ? ((float)ggaDelta * 1000.0f / (float)dt)
     : NAN;
 
   gps10HzBestaetigt =
@@ -1422,7 +1460,8 @@ void gpsRmcRateAktualisieren() {
     gpsRmcRateHz >= 8.5f &&
     gpsRmcRateHz <= 11.5f;
 
-  gpsRmcMessungLetzterZaehler = aktuell;
+  gpsRmcMessungLetzterZaehler = rmcAktuell;
+  gpsGgaMessungLetzterZaehler = ggaAktuell;
   gpsRmcMessungLetzteMs = jetzt;
 }
 
@@ -1477,19 +1516,31 @@ void gpsParserSnapshotAktualisieren() {
 void gpsZeichenEinlesen() {
   bool datenEmpfangen = false;
   static bool aktuellerSatzRmc = false;
+  static bool aktuellerSatzGga = false;
 
   while (gpsSerial.available()) {
     char zeichen = gpsSerial.read();
 
-    gpsRmcSatzErfassen(zeichen, aktuellerSatzRmc);
+    gpsNmeaSatzTypErfassen(
+      zeichen,
+      aktuellerSatzRmc,
+      aktuellerSatzGga
+    );
 
     uint32_t checksumVorher = gps.passedChecksum();
     gps.encode(zeichen);
     uint32_t checksumNachher = gps.passedChecksum();
 
-    if (checksumNachher > checksumVorher && aktuellerSatzRmc) {
-      gpsRmcSaetzeGesamt++;
+    if (checksumNachher > checksumVorher) {
+      if (aktuellerSatzRmc) {
+        gpsRmcSaetzeGesamt++;
+      }
+      if (aktuellerSatzGga) {
+        gpsGgaSaetzeGesamt++;
+      }
+
       aktuellerSatzRmc = false;
+      aktuellerSatzGga = false;
     }
 
     gpsBytesGesamt++;
@@ -2508,7 +2559,7 @@ void setup() {
 
   Serial.println();
   Serial.println("============================================");
-  Serial.println("MF35X LIVETRACKER V5.9.9 OTA SIGNED");
+  Serial.println("MF35X LIVETRACKER V5.9.10 OTA SIGNED");
   Serial.println("FIREBASE-KONFIG + DYNAMISCHE INTERVALLE");
   Serial.println("ADMIN: ESP32 / WLAN / GPS SOFTWARE-NEUSTART");
   Serial.println("OTA: RSA-SIGNIERT + ZWEITE APP-PARTITION + ROLLBACK-SCHUTZ");
@@ -2712,6 +2763,19 @@ void statusAusgeben() {
     Serial.print(" Hz | 10 Hz: ");
     Serial.println(gps10HzBestaetigt ? "BESTAETIGT" : "NOCH NICHT");
   }
+
+  Serial.print("GPS GGA-Rate gemessen: ");
+  if (isnan(gpsGgaRateHz)) {
+    Serial.println("---");
+  } else {
+    Serial.print(gpsGgaRateHz, 1);
+    Serial.println(" Hz | Ziel ca. 1,1 Hz");
+  }
+
+  Serial.print("GPS RMC/GGA Saetze gesamt: ");
+  Serial.print(gpsRmcSaetzeGesamt);
+  Serial.print(" / ");
+  Serial.println(gpsGgaSaetzeGesamt);
 
   Serial.print("GPS Empfang: ");
   Serial.print(GPS_UART_RX_BUFFER_SIZE);
