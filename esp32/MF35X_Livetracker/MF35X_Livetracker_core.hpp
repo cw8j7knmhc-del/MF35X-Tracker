@@ -16,7 +16,7 @@
 #include <freertos/semphr.h>
 
 // ==================================================
-// MF35X LIVETRACKER V5.9.10 OTA SIGNED - GPS FIX REFERENZSTAND
+// MF35X LIVETRACKER V5.9.11 OTA SIGNED - NETZUNABHAENGIGE GPIO11-STEUERUNG
 // GPS + OELTEMP + OELDRUCK + BATTERIE + ZYLINDERTEMP
 // + DREHZAHL + SCHALTAUSGANG + FIREBASE-KONFIGURATION
 // + DYNAMISCHE UPDATEINTERVALLE + RENNHISTORIE
@@ -156,6 +156,14 @@ constexpr unsigned long GPS_FIX_TIMEOUT_MS = 5000UL;
 constexpr uint32_t GPS_TASK_STACK_SIZE = 4096;
 constexpr UBaseType_t GPS_TASK_PRIORITY = 3;
 
+// V5.9.11: Zeitkritische W-Signal-/GPIO11-Steuerung laeuft in einem
+// eigenen FreeRTOS-Task und ist damit unabhaengig von WLAN, LTE, Firebase,
+// Website, HTTPS-Timeouts und Rennhistorie.
+constexpr uint32_t CONTROL_TASK_STACK_SIZE = 3072;
+constexpr UBaseType_t CONTROL_TASK_PRIORITY = 4;
+constexpr TickType_t CONTROL_TASK_PERIOD_TICKS = pdMS_TO_TICKS(10);
+constexpr BaseType_t CONTROL_TASK_CORE = 1;
+
 // Drehzahl vom W-Anschluss ueber HY-M154 / Optokoppler
 constexpr int RPM_PIN = 10;
 
@@ -260,6 +268,10 @@ OutputConfig outputConfig = {
   3150.0f
 };
 
+// Schuetzt die drei zusammengehoerigen Ausgangsschwellen beim Wechsel
+// zwischen Firebase-/loop-Kontext und dem unabhaengigen Steuerungs-Task.
+portMUX_TYPE outputConfigMux = portMUX_INITIALIZER_UNLOCKED;
+
 IntervalConfig intervalConfig = {
   250UL,   // Drehzahl -> Firebase/Website
   100UL,   // Oeldruck -> Firebase/Website
@@ -296,16 +308,17 @@ constexpr float RPM_KALIBRIERFAKTOR = 1.0000f;
 
 // Interne Drehzahlberechnung. Unabhaengig vom Firebase-Upload.
 constexpr unsigned long RPM_MESSINTERVALL_MS = 250UL;
-constexpr unsigned long RPM_SIGNAL_TIMEOUT_US = 1500000UL;
+constexpr unsigned long RPM_SIGNAL_TIMEOUT_US = 500000UL;
 constexpr unsigned long RPM_MIN_PULSABSTAND_US = 100UL;
 
 volatile uint32_t rpmImpulse = 0;
 volatile uint32_t letzterRpmImpulsUs = 0;
 
-float rpmRoh = 0.0f;
-float rpm = 0.0f;
-bool rpmSignalOk = false;
-bool schaltausgangAktiv = false;
+volatile float rpmRoh = 0.0f;
+volatile float rpm = 0.0f;
+volatile bool rpmSignalOk = false;
+volatile bool schaltausgangAktiv = false;
+TaskHandle_t controlTaskHandle = nullptr;
 
 unsigned long letzteRpmMessung = 0;
 
@@ -451,6 +464,8 @@ void firebaseKonfigurationLaden(bool statusMelden);
 void IRAM_ATTR rpmImpulsISR();
 void drehzahlAktualisieren();
 void schaltausgangAktualisieren();
+void steuerungTask(void* parameter);
+void steuerungTaskStarten();
 float widerstandZuBar(float widerstand);
 GpsSnapshot gpsSnapshotLesen();
 void gpsSnapshotZuruecksetzen();
@@ -934,9 +949,11 @@ bool outputConfigUebernehmen(const String& configJson) {
     return false;
   }
 
+  portENTER_CRITICAL(&outputConfigMux);
   outputConfig.speedEnableKmh = (float)speed;
   outputConfig.rpmOn = (float)rpmOn;
   outputConfig.rpmOff = (float)rpmOff;
+  portEXIT_CRITICAL(&outputConfigMux);
   return true;
 }
 
@@ -1158,20 +1175,26 @@ void schaltausgangAktualisieren() {
   // Die Admin-Seite beschreibt "erreicht oder ueberschritten".
   GpsSnapshot gpsDaten = gpsSnapshotLesen();
 
+  // Alle drei Grenzwerte als einen konsistenten Satz uebernehmen.
+  OutputConfig cfg;
+  portENTER_CRITICAL(&outputConfigMux);
+  cfg = outputConfig;
+  portEXIT_CRITICAL(&outputConfigMux);
+
   bool speedFreigabe =
     gpsFixAktuell(gpsDaten) &&
     gpsDaten.speedValid &&
-    gpsDaten.speedKmh >= outputConfig.speedEnableKmh;
+    gpsDaten.speedKmh >= cfg.speedEnableKmh;
 
   // Fail-safe: ohne GPS-Freigabe oder ohne RPM-Signal immer LOW.
   if (!speedFreigabe || !rpmSignalOk) {
     schaltausgangAktiv = false;
   } else {
-    if (!schaltausgangAktiv && rpm >= outputConfig.rpmOn) {
+    if (!schaltausgangAktiv && rpm >= cfg.rpmOn) {
       schaltausgangAktiv = true;
     }
 
-    if (schaltausgangAktiv && rpm < outputConfig.rpmOff) {
+    if (schaltausgangAktiv && rpm < cfg.rpmOff) {
       schaltausgangAktiv = false;
     }
   }
@@ -1180,6 +1203,43 @@ void schaltausgangAktualisieren() {
     SCHALTAUSGANG_PIN,
     schaltausgangAktiv ? HIGH : LOW
   );
+}
+
+// V5.9.11: Dieser Task entkoppelt die komplette lokale Schaltentscheidung
+// vom Netzwerk. Auch waehrend blockierender HTTPS-/Firebase-Aufrufe werden
+// W-Signal, RPM, GPS-Freigabe, Hysterese und GPIO11 weiter bearbeitet.
+void steuerungTask(void* parameter) {
+  (void)parameter;
+  TickType_t letzterStart = xTaskGetTickCount();
+
+  for (;;) {
+    drehzahlAktualisieren();
+    schaltausgangAktualisieren();
+    vTaskDelayUntil(&letzterStart, CONTROL_TASK_PERIOD_TICKS);
+  }
+}
+
+void steuerungTaskStarten() {
+  if (controlTaskHandle != nullptr) return;
+
+  BaseType_t ergebnis = xTaskCreatePinnedToCore(
+    steuerungTask,
+    "MF35X_CTRL",
+    CONTROL_TASK_STACK_SIZE,
+    nullptr,
+    CONTROL_TASK_PRIORITY,
+    &controlTaskHandle,
+    CONTROL_TASK_CORE
+  );
+
+  if (ergebnis == pdPASS) {
+    Serial.println("Steuerungs-Task GPIO10/GPIO11: OK (netzunabhaengig)");
+  } else {
+    controlTaskHandle = nullptr;
+    digitalWrite(SCHALTAUSGANG_PIN, LOW);
+    schaltausgangAktiv = false;
+    Serial.println("WARNUNG: Steuerungs-Task konnte nicht gestartet werden - loop-Fallback aktiv.");
+  }
 }
 
 // ==================================================
@@ -2559,7 +2619,7 @@ void setup() {
 
   Serial.println();
   Serial.println("============================================");
-  Serial.println("MF35X LIVETRACKER V5.9.10 OTA SIGNED");
+  Serial.println("MF35X LIVETRACKER V5.9.11 OTA SIGNED");
   Serial.println("FIREBASE-KONFIG + DYNAMISCHE INTERVALLE");
   Serial.println("ADMIN: ESP32 / WLAN / GPS SOFTWARE-NEUSTART");
   Serial.println("OTA: RSA-SIGNIERT + ZWEITE APP-PARTITION + ROLLBACK-SCHUTZ");
@@ -2601,6 +2661,10 @@ void setup() {
 
   // Ab jetzt wird GPS unabhaengig von HTTPS/Firebase permanent eingelesen.
   gpsTaskStarten();
+
+  // V5.9.11: RPM/GPIO11 ebenfalls vor jedem WLAN-/Firebase-Zugriff starten.
+  // Damit bleibt die Schaltfunktion selbst bei komplettem Netzausfall lokal aktiv.
+  steuerungTaskStarten();
 
   Wire.begin(I2C_SDA, I2C_SCL);
 
@@ -2655,8 +2719,14 @@ void setup() {
 void loop() {
   otaFirmwareValidierenWennBereit();
   gpsEinlesen();
-  drehzahlAktualisieren();
-  schaltausgangAktualisieren();
+
+  // Normalfall: RPM/GPIO11 laufen ausschliesslich im eigenen Steuerungs-Task.
+  // Nur falls dessen Start fehlgeschlagen ist, bleibt die alte loop-Logik als
+  // sicherer Fallback erhalten.
+  if (controlTaskHandle == nullptr) {
+    drehzahlAktualisieren();
+    schaltausgangAktualisieren();
+  }
 
   unsigned long jetzt = millis();
 
@@ -2824,6 +2894,11 @@ void statusAusgeben() {
   Serial.print("Drehzahl Rohwert: ");
   Serial.print(rpmRoh, 0);
   Serial.println(" U/min");
+  Serial.print("Steuerungs-Task GPIO10/GPIO11: ");
+  Serial.print(controlTaskHandle != nullptr ? "OK / NETZUNABHAENGIG" : "FALLBACK / LOOP");
+  Serial.print(" | W-Timeout: ");
+  Serial.print(RPM_SIGNAL_TIMEOUT_US / 1000UL);
+  Serial.println(" ms");
 
   Serial.println("--- Externer High/Low-Ausgang ---");
   Serial.print("Speed-Freigabe >= ");
