@@ -1,4 +1,6 @@
-/* MF35X Tracker – kostenlose ESP32 Online/Offline Browser-Benachrichtigung · nur Admin */
+/* MF35X Tracker – kostenlose ESP32 Online/Offline Browser-Benachrichtigung
+ * Einstellung nur im Admin, Überwachung auf demselben Browser/PWA auch in der Besucheransicht.
+ */
 import { getApps, getApp, initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
@@ -15,16 +17,16 @@ let stateInitialized = false;
 let lastOnlineState = null;
 
 const adminContent = document.getElementById("adminContent");
-
-// Diese Funktion darf ausschliesslich auf der Admin-Seite laufen.
-if (!adminContent) {
-  throw new Error("ESP32-Statusbenachrichtigung ist nur fuer den Admin-Bereich vorgesehen.");
-}
+const isAdminPage = !!adminContent;
 
 const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-setupAdminNotificationSection();
+// Nur im Admin-Bereich wird der Schalter angezeigt und bedienbar gemacht.
+// In der Besucheransicht läuft ausschließlich die unsichtbare Überwachung weiter.
+if (isAdminPage) {
+  setupAdminNotificationSection();
+}
 
 onValue(ref(db, "tracker/device"), snapshot => {
   const device = snapshot.val() || {};
@@ -52,7 +54,7 @@ setInterval(evaluateEsp32State, 250);
 
 function evaluateEsp32State() {
   // Erst nach dem ersten echten Firebase-Live-Snapshot einen Ausgangszustand festlegen.
-  // So entsteht beim Oeffnen/Neuladen der Admin-Seite keine Online-/Offline-Meldung.
+  // So entsteht beim Öffnen/Neuladen von Admin- oder Besucheransicht keine Meldung.
   if (!liveSnapshotSeen) return;
 
   const online =
@@ -77,7 +79,7 @@ function evaluateEsp32State() {
 }
 
 function setupAdminNotificationSection() {
-  if (document.getElementById("esp32NotificationSettings")) return;
+  if (!adminContent || document.getElementById("esp32NotificationSettings")) return;
 
   const section = document.createElement("section");
   section.id = "esp32NotificationSettings";
@@ -85,9 +87,9 @@ function setupAdminNotificationSection() {
   section.innerHTML = `
     <h2>Benachrichtigungen</h2>
     <p class="settings-note settings-note-block">
-      Diese Einstellung ist nur im Admin-Bereich sichtbar. Bei aktiviertem Schalter meldet
-      dieser Browser bzw. diese PWA einen echten Zustandswechsel des ESP32 auf Offline oder Online.
-      Es werden keine Cloud Functions und kein kostenpflichtiger Firebase-Tarif verwendet.
+      Diese Einstellung ist nur im Admin-Bereich sichtbar. Wenn du sie auf diesem Gerät einschaltest,
+      bleibt die ESP32-Online/Offline-Überwachung auch dann aktiv, wenn du danach in die Besucheransicht wechselst.
+      Andere Besucher sehen diesen Schalter nicht und können die Funktion nicht aktivieren.
     </p>
     <div class="settings-actions">
       <label class="switch-row">
@@ -118,8 +120,6 @@ function setupAdminNotificationSection() {
     return;
   }
 
-  // Wurde die Browserfreigabe spaeter entzogen, darf der Schalter nicht weiter
-  // scheinbar aktiv bleiben.
   if (toggle.checked && Notification.permission !== "granted") {
     toggle.checked = false;
     localStorage.setItem(STORAGE_KEY, "false");
@@ -141,7 +141,7 @@ function setupAdminNotificationSection() {
 
   function updateStatusText() {
     if (toggle.checked) {
-      status.textContent = "Ein – Zustandswechsel werden gemeldet";
+      status.textContent = "Ein – auch in Besucheransicht aktiv";
     } else if (Notification.permission === "denied") {
       status.textContent = "Aus – Browser-Benachrichtigungen blockiert";
     } else {
