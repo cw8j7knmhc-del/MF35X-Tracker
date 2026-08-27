@@ -41,6 +41,12 @@ void mf35xAttachStableRpmInterrupt(int pin, int mode);
 #undef setup
 
 #include "rpm_stable_override.hpp"
+
+// Kleine JSON-Hilfe fuer vorzeichenbehaftete ADS1115-Rohwerte.
+void jsonLongFeld(String& json, bool& erstesFeld, const char* key, long wert) {
+  jsonRaw(json, erstesFeld, key, String(wert));
+}
+
 #include "v5917_patch.hpp"
 
 void setup() {
