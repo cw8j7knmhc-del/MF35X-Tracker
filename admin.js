@@ -4,7 +4,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getDatabase, ref, onValue, set, get, update, query, orderByChild, startAt, endAt } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
-const ADMIN_PASSWORD = "mf35x";
+const ADMIN_PASSWORD = "WaGramHaZza35X!";
 const OTA_MANIFEST_URL =
   "https://raw.githubusercontent.com/cw8j7knmhc-del/MF35X-Tracker/main/firmware/manifest.json";
 
