@@ -1,0 +1,32 @@
+name: Test push multi-device
+
+on:
+  push:
+    branches:
+      - feature/push-multidevice-sensors-2026-08-27
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: JavaScript syntax
+        run: |
+          node --check visitor-login.js
+          node --check push-stage-a.js
+          node --check cloudflare/mf35x-push-watch/src/index.js
+      - name: Structural checks
+        run: |
+          grep -q 'MF35X_PUSH_API_URL' push-config.js
+          grep -q 'Gerät aktiv' push-stage-a.js
+          grep -q 'ESP32 Online/Offline' push-stage-a.js
+          grep -q 'Batteriespannung' push-stage-a.js
+          grep -q 'Öldruck' push-stage-a.js
+          grep -q 'Öltemperatur' push-stage-a.js
+          grep -q 'Zylinderkopftemperatur' push-stage-a.js
+          grep -q 'disableLegacyVisitorNotifications' visitor-login.js
+          grep -q 'scheduler.wait' cloudflare/mf35x-push-watch/src/index.js
+          grep -q 'PUSH_ADMIN_CODE' cloudflare/mf35x-push-watch/src/index.js
