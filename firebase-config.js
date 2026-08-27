@@ -28,3 +28,21 @@ if (
     });
   }, 0);
 }
+
+/*
+ * Admin-Komfortfunktionen und Korrektur der historischen Oeldruck-Grenzzeiten.
+ * Rein website-seitig; keine ESP32-/OTA-Aenderung.
+ */
+if (
+  typeof window !== "undefined" &&
+  /\/admin\.html$/.test(window.location.pathname) &&
+  !window.__mf35xAdminSessionAnalysisFixStarted
+) {
+  window.__mf35xAdminSessionAnalysisFixStarted = true;
+
+  setTimeout(() => {
+    import(`./admin-session-analysis-fix.js?v=20260827-1-${Date.now()}`).catch(error => {
+      console.error("Admin-Login/Auswertungsmodul konnte nicht geladen werden:", error);
+    });
+  }, 0);
+}
