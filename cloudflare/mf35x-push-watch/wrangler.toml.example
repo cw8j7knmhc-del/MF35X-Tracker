@@ -12,10 +12,9 @@ OFFLINE_AFTER_MS = "45000"
 # Optional: Beim Antippen der Pushmeldung diese Seite oeffnen.
 # APP_URL = "https://DEINE-GITHUB-PAGES-ADRESSE/"
 
-# Nach dem Erstellen des KV-Namespace die echte ID eintragen.
 [[kv_namespaces]]
 binding = "STATE"
-id = "REPLACE_WITH_CLOUDFLARE_KV_NAMESPACE_ID"
+id = "4df972f00d69403fa4a8582a12178d58"
 
 # NIEMALS hier eintragen:
 # - GOOGLE_SERVICE_ACCOUNT_JSON
