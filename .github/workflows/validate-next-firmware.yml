@@ -1,0 +1,110 @@
+name: Validate prepared MF35X firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [prepared/next-firmware-hardening]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mf35x-next-firmware-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare-and-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply deterministic preparation
+        run: python3 tools/prepare_next_firmware.py
+
+      - name: Static consistency checks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          admin = (root / 'admin.js').read_text(encoding='utf-8')
+          html = (root / 'admin.html').read_text(encoding='utf-8')
+          metrics = (root / 'esp32/MF35X_Livetracker/device_metrics_alarm.hpp').read_text(encoding='utf-8')
+          offline = (root / 'esp32/MF35X_Livetracker/offline_race_buffer.hpp').read_text(encoding='utf-8')
+          core = (root / 'esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp').read_text(encoding='utf-8')
+          version = (root / 'esp32/MF35X_Livetracker/firmware_version.h').read_text(encoding='utf-8')
+          diag = (root / 'esp32/MF35X_Livetracker/oil_pressure_diagnostics.hpp').read_text(encoding='utf-8')
+
+          checks = {
+              'legacy admin reset file removed': not (root / 'admin-reset-fix.js').exists(),
+              'legacy reset import removed': 'admin-reset-fix.js' not in html,
+              'single max reset click handler': admin.count('addEventListener("click", resetMaxValues)') == 1,
+              'output defaults aligned': 'rpm_on: 2500' in admin and 'rpm_off: 2450' in admin and '{60.0f, 2500.0f, 2450.0f}' in core,
+              'firmware version bumped': '"V5.9.17"' in version and '50917UL' in version,
+              'max generation transaction': 'DEVICE_MAX_STATE_PENDING_BIT' in metrics and '"generation"' in metrics,
+              'max speed plausibility': 'DEVICE_MAX_SPEED_PLAUSIBLE_KMH = 120.0f' in metrics,
+              'max rpm plausibility': 'DEVICE_MAX_RPM_PLAUSIBLE = 6000.0f' in metrics,
+              'legacy race record remains 64 bytes': 'static_assert(sizeof(OfflineRaceRecord) == 64' in offline and 'OFFLINE_RECORD_VERSION = 1' in offline,
+              'diagnostic companion integrated': 'mf35xOilDiagCapture' in offline and 'mf35xOilDiagPersist' in offline and 'mf35xOilDiagAppendJson' in offline,
+              'oil raw pre-clamp available': 'oilPressureBarRaw = widerstandZuBar' in core,
+              'csv exports diagnostics': 'Oeldruck_AIN1_ADC_Mittel' in admin and 'oil_pressure_diag_status' in admin,
+              'diagnostic record CRC': 'mf35xOilDiagRecordCrc' in diag and 'static_assert(sizeof(Mf35xOilDiagRecord) == 42' in diag,
+              'live firmware uses version macro': 'jsonText(json, first, "firmware", MF35X_FIRMWARE_VERSION)' in core,
+          }
+          failed = [name for name, ok in checks.items() if not ok]
+          for name, ok in checks.items():
+              print(('OK   ' if ok else 'FAIL ') + name)
+          if failed:
+              raise SystemExit('Static checks failed: ' + ', '.join(failed))
+          PY
+
+      - name: JavaScript syntax check
+        run: node --check admin.js
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile exactly like production target
+        run: |
+          rm -rf build
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
+            --output-dir build \
+            esp32/MF35X_Livetracker
+
+      - name: Commit prepared files only after all tests pass
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Prepared branch already matches validated state."
+            exit 0
+          fi
+          git commit -m "Prepare V5.9.17 max reset hardening and race diagnostics"
+          git push origin HEAD:prepared/next-firmware-hardening
