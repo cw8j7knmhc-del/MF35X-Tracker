@@ -11,25 +11,6 @@ const firebaseConfig = {
 export { firebaseConfig };
 
 /*
- * Die alte ESP32-Online/Offline-Browserbenachrichtigung bleibt vorerst als
- * Rueckfallebene bestehen, bis die neue echte Mehrgeraete-Pushloesung komplett
- * praktisch bestaetigt ist. Nur im Adminbereich wird ihr Schalter angezeigt.
- */
-if (
-  typeof window !== "undefined" &&
-  /\/admin\.html$/.test(window.location.pathname) &&
-  !window.__mf35xEsp32StatusLoaderStarted
-) {
-  window.__mf35xEsp32StatusLoaderStarted = true;
-
-  setTimeout(() => {
-    import(`./esp32-status-notifications.js?v=9.5.14-${Date.now()}`).catch(error => {
-      console.error("ESP32-Statusbenachrichtigung konnte nicht geladen werden:", error);
-    });
-  }, 0);
-}
-
-/*
  * Echte Web-Push-Geraeteverwaltung. Ein Fehler in diesem optionalen Modul darf
  * weder Admin noch Tracker blockieren. Push-Berechtigungen werden nur nach einem
  * bewussten Klick im Adminbereich angefordert.
