@@ -11,15 +11,9 @@ const firebaseConfig = {
 export { firebaseConfig };
 
 /*
- * Die ESP32-Online/Offline-Einstellung ist bewusst eine reine Admin-Funktion.
- * Nur auf admin.html wird der Schalter angezeigt und kann verändert werden.
- *
- * Wenn die Funktion auf diesem Browser/PWA im Admin aktiviert wurde, darf die
- * eigentliche Überwachung anschließend auch unsichtbar in der Besucheransicht
- * weiterlaufen. Dadurch bleiben Meldungen beim Wechsel vom Admin zur Liveansicht aktiv.
- *
- * admin.html lädt firebase-config.js an mehreren Stellen mit unterschiedlichen
- * Cache-Parametern. Der globale Guard verhindert deshalb einen doppelten Admin-Start.
+ * Die alte ESP32-Online/Offline-Browserbenachrichtigung bleibt vorerst als
+ * Rueckfallebene bestehen, bis die neue echte Mehrgeraete-Pushloesung komplett
+ * praktisch bestaetigt ist. Nur im Adminbereich wird ihr Schalter angezeigt.
  */
 if (
   typeof window !== "undefined" &&
@@ -36,21 +30,20 @@ if (
 }
 
 /*
- * Web Push Stufe A ist absichtlich separat und rein optional.
- * Ein Fehler in diesem Testmodul darf weder Admin noch Tracker blockieren.
- * Das Modul fordert keinerlei Berechtigung automatisch an; erst der bewusste
- * Klick im Adminbereich startet die Service-Worker-/FCM-Einrichtung.
+ * Echte Web-Push-Geraeteverwaltung. Ein Fehler in diesem optionalen Modul darf
+ * weder Admin noch Tracker blockieren. Push-Berechtigungen werden nur nach einem
+ * bewussten Klick im Adminbereich angefordert.
  */
 if (
   typeof window !== "undefined" &&
   /\/admin\.html$/.test(window.location.pathname) &&
-  !window.__mf35xWebPushStageALoaderStarted
+  !window.__mf35xWebPushDeviceLoaderStarted
 ) {
-  window.__mf35xWebPushStageALoaderStarted = true;
+  window.__mf35xWebPushDeviceLoaderStarted = true;
 
   setTimeout(() => {
-    import(`./push-stage-a.js?v=stage-a-${Date.now()}`).catch(error => {
-      console.error("Web-Push Stufe A konnte nicht geladen werden:", error);
+    import(`./push-stage-a.js?v=devices-${Date.now()}`).catch(error => {
+      console.error("Web-Push-Geraeteverwaltung konnte nicht geladen werden:", error);
     });
   }, 0);
 }
