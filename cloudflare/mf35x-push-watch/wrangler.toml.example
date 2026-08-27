@@ -18,5 +18,7 @@ id = "4df972f00d69403fa4a8582a12178d58"
 
 # NIEMALS hier eintragen:
 # - GOOGLE_SERVICE_ACCOUNT_JSON
-# - FCM_TOKEN
-# Diese beiden Werte als Cloudflare Worker Secrets speichern.
+# - FCM_TOKEN (bleibt waehrend der Migration nur als Legacy-Fallback)
+# - PUSH_ADMIN_CODE
+# Diese Werte als Cloudflare Worker Secrets speichern.
+# PUSH_ADMIN_CODE schuetzt Registrierung, Liste, Ein/Aus und Loeschen von Push-Geraeten.
