@@ -15,8 +15,8 @@ const DEFAULT_LIMITS = {
 
 const DEFAULT_OUTPUT_CONFIG = {
   speed_enable_kmh: 60,
-  rpm_on: 3200,
-  rpm_off: 3150
+  rpm_on: 2500,
+  rpm_off: 2450
 };
 
 // Muss mit dem aktuellen ESP32-Referenzstand übereinstimmen.
@@ -87,13 +87,9 @@ try {
 // --------------------------------------------------
 // Maximalwerte: ausschließlich den ESP32 zurücksetzen
 // --------------------------------------------------
-// Wichtig: admin.html enthält noch einen älteren Capture-Handler, der nur
-// tracker/maxValues in Firebase löscht. Dieser Handler würde die NVS-Werte des
-// ESP32 unangetastet lassen. Da diese Datei vor dem Inline-Handler geladen wird,
-// fängt dieser Capture-Handler den Klick zuerst ab und sendet stattdessen den
-// zentralen V5.9.13+-Systembefehl an den ESP32. Der ESP32 setzt damit seine
-// lokalen/NVS-Maximalwerte zurück und spiegelt anschließend den neuen Zustand
-// nach Firebase. Besucher- und Adminseite bleiben dadurch reine Leser der Werte.
+// Der ESP32 verwaltet seine Maximalwerte zentral in NVS und Firebase.
+// Dieser Capture-Handler stellt sicher, dass der Reset ausschließlich über
+// den V5.9.13+-Systembefehl an den ESP32 läuft.
 withResetButton(
   document.getElementById("resetMaxValues"),
   "Wird zurückgesetzt...",
@@ -177,7 +173,7 @@ withResetButton(
 
       setStatus(
         "outputConfigStatus",
-        "Standardwerte 60 / 3200 / 3150 geladen und gespeichert.",
+        "Standardwerte 60 / 2500 / 2450 geladen und gespeichert.",
         "success"
       );
     } catch (error) {
