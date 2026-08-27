@@ -1,4 +1,4 @@
-/* MF35X Besucher-Passwortschutz V9.5.11 – Besucherbenachrichtigungen entfernt, Push zentral im Admin */
+/* MF35X Besucher-Passwortschutz V9.5.12 – optional 1 Stunde angemeldet bleiben */
 
 // =============================================================
 // BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFUEHRUNGSZEICHEN AENDERN
@@ -6,6 +6,8 @@
 const VISITOR_PASSWORD = "mf35x";
 
 const SESSION_KEY = "mf35x_visitor_access_v1";
+const PERSISTENT_ACCESS_KEY = "mf35x_visitor_remember_v1";
+const PERSISTENT_ACCESS_MS = 60 * 60 * 1000;
 const STATUS_NOTIFICATION_STORAGE_KEY = "mf35xEsp32StatusNotificationsEnabled";
 const LEGACY_VISITOR_NOTIFICATION_STORAGE_KEY = "mf35xNotificationsEnabled";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
@@ -24,13 +26,30 @@ let trackerStarted = false;
 let trackerStartPromise = null;
 let statusMonitorStarted = false;
 let statusMonitorStartPromise = null;
+let persistentExpiryTimer = null;
+
+const rememberLabel = document.createElement("label");
+rememberLabel.className = "switch-row";
+rememberLabel.style.justifyContent = "space-between";
+rememberLabel.style.textAlign = "left";
+rememberLabel.style.margin = "2px 0 4px";
+
+const rememberText = document.createElement("span");
+rememberText.textContent = "Auf diesem Gerät 1 Stunde angemeldet bleiben";
+
+const rememberInput = document.createElement("input");
+rememberInput.type = "checkbox";
+rememberInput.id = "visitorRememberLogin";
+
+const rememberSlider = document.createElement("span");
+rememberSlider.className = "slider";
+rememberLabel.append(rememberText, rememberInput, rememberSlider);
+loginButton.insertAdjacentElement("beforebegin", rememberLabel);
 
 /*
  * Besucher ohne Freigabe laden bewusst KEINE komplette Tracker-/Firebase-Logik.
- * Nur wenn die alte ESP32-Online/Offline-Benachrichtigung auf genau diesem Browser/PWA
- * vorher im Adminbereich aktiviert wurde, darf der kleine Statusmonitor vorerst als
- * Rueckfallebene bereits vor dem Besucherlogin laufen. Die neue echte Push-Verwaltung
- * wird ausschliesslich im Adminbereich konfiguriert.
+ * Der alte Browser-Statusmonitor ist inzwischen stillgelegt; der Aufruf bleibt
+ * nur als harmlose Kompatibilitaet zu bereits gespeicherten Browserwerten bestehen.
  */
 startStatusMonitorIfEnabled().catch(error => {
   console.error("ESP32-Statusmonitor konnte nicht gestartet werden:", error);
@@ -50,12 +69,22 @@ loginForm.addEventListener("submit", async event => {
       return;
     }
 
-    rememberAccess();
+    rememberSessionAccess();
+
+    if (rememberInput.checked) {
+      const expiresAt = Date.now() + PERSISTENT_ACCESS_MS;
+      rememberPersistentAccess(expiresAt);
+      schedulePersistentExpiry(expiresAt);
+    } else {
+      forgetPersistentAccess();
+    }
+
     await openVisitorApp();
   } catch (error) {
     console.error("Besucher-Anmeldung fehlgeschlagen:", error);
     loginError.textContent = "Anmeldung fehlgeschlagen. Bitte Seite neu laden.";
   } finally {
+    passwordInput.value = "";
     if (!visitorApp.hidden) return;
     loginButton.disabled = false;
     loginButton.textContent = "Besucheransicht oeffnen";
@@ -66,6 +95,17 @@ logoutButton.addEventListener("click", () => {
   forgetAccess();
   location.reload();
 });
+
+const persistentExpiry = readPersistentAccessExpiry();
+if (persistentExpiry > Date.now()) {
+  rememberInput.checked = true;
+  rememberSessionAccess();
+  schedulePersistentExpiry(persistentExpiry);
+} else if (persistentExpiry) {
+  // Eine abgelaufene 1-Stunden-Freigabe beendet auch eine eventuell noch
+  // vorhandene Session desselben Tabs/PWA-Fensters.
+  forgetAccess();
+}
 
 if (hasRememberedAccess()) {
   openVisitorApp().catch(error => {
@@ -204,7 +244,7 @@ function loadLeaflet() {
   });
 }
 
-function rememberAccess() {
+function rememberSessionAccess() {
   try {
     sessionStorage.setItem(SESSION_KEY, "granted");
   } catch (error) {
@@ -212,11 +252,52 @@ function rememberAccess() {
   }
 }
 
+function rememberPersistentAccess(expiresAt) {
+  try {
+    localStorage.setItem(PERSISTENT_ACCESS_KEY, JSON.stringify({ expiresAt }));
+  } catch (error) {
+    console.warn("Besucherfreigabe konnte nicht dauerhaft gespeichert werden:", error);
+  }
+}
+
+function readPersistentAccessExpiry() {
+  try {
+    const raw = localStorage.getItem(PERSISTENT_ACCESS_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    const expiresAt = Number(parsed?.expiresAt || 0);
+    return Number.isFinite(expiresAt) ? expiresAt : 0;
+  } catch {
+    return 0;
+  }
+}
+
 function hasRememberedAccess() {
   try {
-    return sessionStorage.getItem(SESSION_KEY) === "granted";
+    if (sessionStorage.getItem(SESSION_KEY) === "granted") return true;
+    const expiresAt = readPersistentAccessExpiry();
+    return expiresAt > Date.now();
   } catch (error) {
     return false;
+  }
+}
+
+function schedulePersistentExpiry(expiresAt) {
+  if (persistentExpiryTimer) clearTimeout(persistentExpiryTimer);
+  const remaining = Math.max(0, expiresAt - Date.now());
+  persistentExpiryTimer = setTimeout(() => {
+    forgetAccess();
+    location.reload();
+  }, Math.min(remaining, 2147483647));
+}
+
+function forgetPersistentAccess() {
+  if (persistentExpiryTimer) clearTimeout(persistentExpiryTimer);
+  persistentExpiryTimer = null;
+  try {
+    localStorage.removeItem(PERSISTENT_ACCESS_KEY);
+  } catch (error) {
+    console.warn("Dauerhafte Besucherfreigabe konnte nicht entfernt werden:", error);
   }
 }
 
@@ -226,6 +307,7 @@ function forgetAccess() {
   } catch (error) {
     console.warn("Besucherfreigabe konnte nicht entfernt werden:", error);
   }
+  forgetPersistentAccess();
 }
 
 function showLoginError(message) {
