@@ -1,4 +1,4 @@
-/* MF35X Besucher-Passwortschutz V9.5.10 – Login zuerst, optionale Statusueberwachung getrennt */
+/* MF35X Besucher-Passwortschutz V9.5.11 – Besucherbenachrichtigungen entfernt, Push zentral im Admin */
 
 // =============================================================
 // BESUCHERPASSWORT – NUR DEN TEXT ZWISCHEN DEN ANFUEHRUNGSZEICHEN AENDERN
@@ -7,6 +7,7 @@ const VISITOR_PASSWORD = "mf35x";
 
 const SESSION_KEY = "mf35x_visitor_access_v1";
 const STATUS_NOTIFICATION_STORAGE_KEY = "mf35xEsp32StatusNotificationsEnabled";
+const LEGACY_VISITOR_NOTIFICATION_STORAGE_KEY = "mf35xNotificationsEnabled";
 const LEAFLET_SCRIPT_URL = "https://unpkg.com/leaflet/dist/leaflet.js";
 const TRACKER_SCRIPT_URL = "./script.js?v=9.5.6";
 const ESP32_STATUS_NOTIFICATION_SCRIPT_URL = "./esp32-status-notifications.js?v=9.5.15";
@@ -26,10 +27,10 @@ let statusMonitorStartPromise = null;
 
 /*
  * Besucher ohne Freigabe laden bewusst KEINE komplette Tracker-/Firebase-Logik.
- * Nur wenn die ESP32-Online/Offline-Benachrichtigung auf genau diesem Browser/PWA
- * vorher im Adminbereich aktiviert wurde, darf der kleine Statusmonitor bereits
- * vor dem Besucherlogin laufen. Dadurch bleibt die gewuenschte Admin-Funktion
- * erhalten, ohne normale Besucher mit der kompletten Liveansicht zu verbinden.
+ * Nur wenn die alte ESP32-Online/Offline-Benachrichtigung auf genau diesem Browser/PWA
+ * vorher im Adminbereich aktiviert wurde, darf der kleine Statusmonitor vorerst als
+ * Rueckfallebene bereits vor dem Besucherlogin laufen. Die neue echte Push-Verwaltung
+ * wird ausschliesslich im Adminbereich konfiguriert.
  */
 startStatusMonitorIfEnabled().catch(error => {
   console.error("ESP32-Statusmonitor konnte nicht gestartet werden:", error);
@@ -81,8 +82,18 @@ async function startTrackerInBackground() {
   if (trackerStartPromise) return trackerStartPromise;
 
   trackerStartPromise = (async () => {
+    // Die alte Besucher-Alarmbenachrichtigung wird zentral abgeschaltet.
+    // Dadurch kann script.js beim Laden weiterhin unveraendert initialisieren,
+    // erzeugt aber auf der Besucheransicht keine lokalen Notification-Popups mehr.
+    disableLegacyVisitorNotifications();
+
     await loadLeaflet();
     await import(`${TRACKER_SCRIPT_URL}-${Date.now()}`);
+
+    // Die alten Besucher-Schalter werden erst NACH script.js entfernt, damit dessen
+    // bestehende Initialisierung keine fehlenden DOM-Elemente vorfindet.
+    removeLegacyVisitorNotificationControls();
+
     await startStatusMonitorIfEnabled();
     trackerStarted = true;
   })();
@@ -120,6 +131,28 @@ function shouldRunStatusMonitor() {
     );
   } catch (error) {
     return false;
+  }
+}
+
+function disableLegacyVisitorNotifications() {
+  try {
+    localStorage.setItem(LEGACY_VISITOR_NOTIFICATION_STORAGE_KEY, "false");
+  } catch (error) {
+    console.warn("Alte Besucher-Benachrichtigung konnte nicht deaktiviert werden:", error);
+  }
+}
+
+function removeLegacyVisitorNotificationControls() {
+  const panel = document.querySelector(".notify-panel");
+  if (!panel) return;
+
+  panel.querySelector("#requestNotifications")?.remove();
+  panel.querySelector("#notificationToggle")?.closest("label")?.remove();
+  panel.querySelector("#notifyStatus")?.remove();
+
+  // Der Admin-Link bleibt bewusst erhalten.
+  if (!panel.querySelector(".admin-link")) {
+    panel.remove();
   }
 }
 
