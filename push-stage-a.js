@@ -6,7 +6,7 @@
 import { getApps, getApp, initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getMessaging, getToken, isSupported, onMessage } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { MF35X_VAPID_PUBLIC_KEY, MF35X_PUSH_API_URL } from "./push-config.js";
+import { MF35X_VAPID_PUBLIC_KEY, MF35X_PUSH_API_URL } from "./push-config.js?v=devices-20260827-1";
 
 const ADMIN_CODE_SESSION_KEY = "mf35x_push_admin_code_v1";
 const adminContent = document.getElementById("adminContent");
