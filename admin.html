@@ -366,7 +366,7 @@
   await import(`./admin-reset-fix.js?v=9.5.13-${Date.now()}`);
 
   const { getApps, getApp, initializeApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-  const { getDatabase, ref, onValue, set } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
+  const { getDatabase, ref, onValue } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js");
   const { firebaseConfig } = await import(`./firebase-config.js?v=9.5.13-${Date.now()}`);
 
   const outputApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
@@ -429,37 +429,11 @@
   setInterval(renderExternalOutputStatus, 1000);
 
   // --------------------------------------------------
-  // Maximalwerte: echter Neustart der Messung
+  // Maximalwerte: nur Statusanzeige
   // --------------------------------------------------
-  const resetMaxButton = document.getElementById("resetMaxValues");
+  // Der Reset selbst wird zentral als ESP32-Systembefehl ausgelöst.
+  // Diese Stelle liest ausschließlich resetAt für die Anzeige.
   const resetMaxStatus = document.getElementById("maxValuesResetStatus");
-
-  // Der alte admin.js-Handler setzt die aktuellen Livewerte direkt wieder ein.
-  // Dieser Capture-Handler ersetzt dieses Verhalten: Nach Reset bleiben nur
-  // resetAt + danach neu eintreffende Messwerte bestehen.
-  resetMaxButton?.addEventListener("click", async event => {
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    const originalText = resetMaxButton.textContent;
-    resetMaxButton.disabled = true;
-    resetMaxButton.textContent = "Wird zurückgesetzt...";
-
-    try {
-      const resetAt = Date.now();
-      await set(ref(outputDb, "tracker/maxValues"), { resetAt });
-      if (resetMaxStatus) {
-        resetMaxStatus.textContent =
-          `Zurückgesetzt: ${new Date(resetAt).toLocaleTimeString("de-AT")}`;
-      }
-      alert("Maximalwerte gelöscht. Ab dem nächsten neuen Messwert beginnt die Erfassung neu.");
-    } catch (error) {
-      alert("Fehler beim Zurücksetzen: " + error.message);
-    } finally {
-      resetMaxButton.disabled = false;
-      resetMaxButton.textContent = originalText;
-    }
-  }, true);
 
   onValue(ref(outputDb, "tracker/maxValues"), snapshot => {
     const values = snapshot.val() || {};
