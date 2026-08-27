@@ -34,3 +34,23 @@ if (
     });
   }, 0);
 }
+
+/*
+ * Web Push Stufe A ist absichtlich separat und rein optional.
+ * Ein Fehler in diesem Testmodul darf weder Admin noch Tracker blockieren.
+ * Das Modul fordert keinerlei Berechtigung automatisch an; erst der bewusste
+ * Klick im Adminbereich startet die Service-Worker-/FCM-Einrichtung.
+ */
+if (
+  typeof window !== "undefined" &&
+  /\/admin\.html$/.test(window.location.pathname) &&
+  !window.__mf35xWebPushStageALoaderStarted
+) {
+  window.__mf35xWebPushStageALoaderStarted = true;
+
+  setTimeout(() => {
+    import(`./push-stage-a.js?v=stage-a-${Date.now()}`).catch(error => {
+      console.error("Web-Push Stufe A konnte nicht geladen werden:", error);
+    });
+  }, 0);
+}
