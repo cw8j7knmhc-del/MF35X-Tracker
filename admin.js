@@ -1,4 +1,4 @@
-/* MF35X Tracker Admin V9.5.14 */
+/* MF35X Tracker Admin V9.5.15 */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getDatabase, ref, onValue, set, get, update, query, orderByChild, startAt, endAt } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
@@ -21,8 +21,8 @@ const DEFAULT_LIMITS = {
 
 const DEFAULT_OUTPUT_CONFIG = {
   speed_enable_kmh: 60,
-  rpm_on: 3200,
-  rpm_off: 3150
+  rpm_on: 2500,
+  rpm_off: 2450
 };
 
 const DEFAULT_INTERVALS = {
@@ -1268,12 +1268,36 @@ async function analysisLoadRange(start, stop) {
   }
 }
 
+function analysisNormalizeNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function analysisNormalizeSample(sample) {
   const normalized = { timestamp: Number(sample.timestamp) };
   for (const key of Object.keys(ANALYSIS_METRICS)) {
-    const n = Number(sample[key]);
-    normalized[key] = Number.isFinite(n) ? n : null;
+    normalized[key] = analysisNormalizeNumber(sample[key]);
   }
+
+  // Diagnose-/Kontextwerte werden bewusst nicht in die normale Besucheranzeige
+  // aufgenommen. Sie stehen nur der Admin-Rennauswertung und dem CSV-Export zur Verfügung.
+  for (const key of [
+    "battery_v", "hdop", "satellites", "wifi_rssi",
+    "oil_pressure_adc_avg", "oil_pressure_adc_min", "oil_pressure_adc_max",
+    "oil_pressure_voltage_avg", "oil_pressure_voltage_min", "oil_pressure_voltage_max",
+    "oil_pressure_ohm", "oil_pressure_raw_bar",
+    "oil_pressure_diag_samples", "oil_pressure_diag_invalid"
+  ]) {
+    normalized[key] = analysisNormalizeNumber(sample[key]);
+  }
+
+  normalized.oil_pressure_diag_status =
+    typeof sample.oil_pressure_diag_status === "string"
+      ? sample.oil_pressure_diag_status
+      : "";
+  normalized.sample_id = typeof sample.sample_id === "string" ? sample.sample_id : "";
+  normalized.buffered_replay = sample.buffered_replay === true;
   return normalized;
 }
 
@@ -1559,13 +1583,27 @@ function analysisExportCsv() {
   const meta = analysisRaces[analysisRaceSelect.value] || {};
   const header = [
     "Zeitpunkt", "timestamp", "Zylinderkopftemperatur_C", "Motoroeltemperatur_C",
-    "Getriebeoeltemperatur_C", "Oeldruck_bar", "Drehzahl_Umin", "Geschwindigkeit_kmh"
+    "Getriebeoeltemperatur_C", "Oeldruck_final_bar", "Drehzahl_Umin", "Geschwindigkeit_kmh",
+    "Batterie_V", "GPS_HDOP", "GPS_Satelliten", "WLAN_RSSI_dBm",
+    "Oeldruck_AIN1_ADC_Mittel", "Oeldruck_AIN1_ADC_Min", "Oeldruck_AIN1_ADC_Max",
+    "Oeldruck_AIN1_Spannung_Mittel_V", "Oeldruck_AIN1_Spannung_Min_V", "Oeldruck_AIN1_Spannung_Max_V",
+    "Oeldruck_Geber_Ohm", "Oeldruck_vor_Begrenzung_bar",
+    "Oeldruck_Diagnose_Messungen", "Oeldruck_Diagnose_Ungueltig", "Oeldruck_Diagnose_Status",
+    "Sample_ID", "Offline_nachgesendet"
   ];
   const rows = analysisCurrentSamples.map(s => [
     analysisFormatDateTime(s.timestamp, true), s.timestamp,
     analysisCsvNumber(s.cylinder_temp), analysisCsvNumber(s.oil_temp),
     analysisCsvNumber(s.gear_oil_temp), analysisCsvNumber(s.oil_pressure),
-    analysisCsvNumber(s.rpm), analysisCsvNumber(s.speed_kmh)
+    analysisCsvNumber(s.rpm), analysisCsvNumber(s.speed_kmh),
+    analysisCsvNumber(s.battery_v), analysisCsvNumber(s.hdop),
+    analysisCsvNumber(s.satellites), analysisCsvNumber(s.wifi_rssi),
+    analysisCsvNumber(s.oil_pressure_adc_avg), analysisCsvNumber(s.oil_pressure_adc_min),
+    analysisCsvNumber(s.oil_pressure_adc_max), analysisCsvNumber(s.oil_pressure_voltage_avg),
+    analysisCsvNumber(s.oil_pressure_voltage_min), analysisCsvNumber(s.oil_pressure_voltage_max),
+    analysisCsvNumber(s.oil_pressure_ohm), analysisCsvNumber(s.oil_pressure_raw_bar),
+    analysisCsvNumber(s.oil_pressure_diag_samples), analysisCsvNumber(s.oil_pressure_diag_invalid),
+    s.oil_pressure_diag_status || "", s.sample_id || "", s.buffered_replay ? "JA" : "NEIN"
   ]);
   const csv = "\ufeff" + [header, ...rows]
     .map(row => row.map(analysisCsvEscape).join(";"))

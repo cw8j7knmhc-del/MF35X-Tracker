@@ -1,7 +1,8 @@
 /*
-  MF35X Livetracker V5.9.16 OTA SIGNED
+  MF35X Livetracker V5.9.17 OTA SIGNED
   - robuste Drehzahlauswertung am W-Anschluss mit Median + Plausibilitaetsfilter
   - schnelle GPIO11-Steuerung bleibt netzunabhaengig
+  - stromausfallsichere Maxwert-Generationen + Oeldruck-Renndiagnose
 
   Diese .ino-Datei bleibt absichtlich minimal.
   Der eigentliche Tracker-Code liegt in MF35X_Livetracker_core.hpp.
@@ -27,6 +28,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+#include "oil_pressure_diagnostics.hpp"
 
 void mf35xAttachStableRpmInterrupt(int pin, int mode);
 

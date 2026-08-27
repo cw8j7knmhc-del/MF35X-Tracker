@@ -269,8 +269,8 @@ struct RecordingConfig {
 
 OutputConfig outputConfig = {
   60.0f,
-  3200.0f,
-  3150.0f
+  2500.0f,
+  2450.0f
 };
 
 // Schuetzt die drei zusammengehoerigen Ausgangsschwellen beim Wechsel
@@ -368,7 +368,12 @@ constexpr int DRUCK_ANZAHL_PUNKTE = 6;
 
 float oilPressureVoltage = NAN;
 float oilPressureOhm = NAN;
+float oilPressureBarRaw = NAN;
 float oilPressureBar = NAN;
+int16_t oilPressureAdcAvg = 0;
+int16_t oilPressureAdcMin = 0;
+int16_t oilPressureAdcMax = 0;
+uint8_t oilPressureDiagStatus = MF35X_OIL_DIAG_NO_DATA;
 
 // ==================================================
 // BATTERIESPANNUNG
@@ -791,7 +796,7 @@ void lokaleKonfigurationLaden() {
       outputConfig.rpmOn < 0.0f || outputConfig.rpmOn > 10000.0f ||
       outputConfig.rpmOff < 0.0f || outputConfig.rpmOff > 10000.0f ||
       outputConfig.rpmOff >= outputConfig.rpmOn) {
-    outputConfig = {60.0f, 3200.0f, 3150.0f};
+    outputConfig = {60.0f, 2500.0f, 2450.0f};
   }
 
   if (intervalConfig.rpmFirebaseUpdateMs < 100UL || intervalConfig.rpmFirebaseUpdateMs > 5000UL) {
@@ -1914,31 +1919,51 @@ void oeldruckLesen() {
   if (!adsOk) {
     oilPressureVoltage = NAN;
     oilPressureOhm = NAN;
+    oilPressureBarRaw = NAN;
     oilPressureBar = NAN;
+    oilPressureAdcAvg = 0;
+    oilPressureAdcMin = 0;
+    oilPressureAdcMax = 0;
+    oilPressureDiagStatus = MF35X_OIL_DIAG_ADS_OFFLINE;
+    mf35xOilDiagObserve(false, false, 0, 0, 0, NAN, NAN, NAN, NAN, oilPressureDiagStatus);
     return;
   }
 
   float summe = 0.0f;
+  int32_t rohSumme = 0;
+  int16_t rohMin = INT16_MAX;
+  int16_t rohMax = INT16_MIN;
 
   for (int i = 0; i < 20; i++) {
-    int16_t rohwert = ads.readADC_SingleEnded(ADS_KANAL_OELDRUCK);
+    const int16_t rohwert = ads.readADC_SingleEnded(ADS_KANAL_OELDRUCK);
+    rohSumme += rohwert;
+    if (rohwert < rohMin) rohMin = rohwert;
+    if (rohwert > rohMax) rohMax = rohwert;
     summe += ads.computeVolts(rohwert);
     delay(5);
     gpsEinlesen();
   }
 
+  oilPressureAdcAvg = (int16_t)lroundf((float)rohSumme / 20.0f);
+  oilPressureAdcMin = rohMin;
+  oilPressureAdcMax = rohMax;
   oilPressureVoltage = summe / 20.0f;
+  oilPressureOhm = NAN;
+  oilPressureBarRaw = NAN;
+  oilPressureBar = NAN;
 
   if (oilPressureVoltage < 0.02f) {
-    oilPressureOhm = NAN;
-    oilPressureBar = NAN;
+    oilPressureDiagStatus = MF35X_OIL_DIAG_SHORT_OR_LOW;
+    mf35xOilDiagObserve(true, true, oilPressureAdcAvg, oilPressureAdcMin, oilPressureAdcMax,
+                        oilPressureVoltage, NAN, NAN, NAN, oilPressureDiagStatus);
     return;
   }
 
   if (oilPressureVoltage > 3.10f ||
       oilPressureVoltage >= DRUCK_VCC - 0.02f) {
-    oilPressureOhm = NAN;
-    oilPressureBar = NAN;
+    oilPressureDiagStatus = MF35X_OIL_DIAG_OPEN_OR_HIGH;
+    mf35xOilDiagObserve(true, true, oilPressureAdcAvg, oilPressureAdcMin, oilPressureAdcMax,
+                        oilPressureVoltage, NAN, NAN, NAN, oilPressureDiagStatus);
     return;
   }
 
@@ -1947,11 +1972,22 @@ void oeldruckLesen() {
     oilPressureVoltage /
     (DRUCK_VCC - oilPressureVoltage);
 
-  oilPressureBar = widerstandZuBar(oilPressureOhm);
+  oilPressureBarRaw = widerstandZuBar(oilPressureOhm);
+  oilPressureBar = oilPressureBarRaw;
+  oilPressureDiagStatus = MF35X_OIL_DIAG_OK;
 
   if (!isnan(oilPressureBar) && oilPressureBar < 0.55f) {
     oilPressureBar = 0.0f;
+    oilPressureDiagStatus = MF35X_OIL_DIAG_CLAMP_ZERO;
   }
+
+  if (!isfinite(oilPressureOhm) || !isfinite(oilPressureBarRaw)) {
+    oilPressureDiagStatus = MF35X_OIL_DIAG_INVALID;
+  }
+
+  mf35xOilDiagObserve(true, true, oilPressureAdcAvg, oilPressureAdcMin, oilPressureAdcMax,
+                      oilPressureVoltage, oilPressureOhm, oilPressureBarRaw,
+                      oilPressureBar, oilPressureDiagStatus);
 }
 
 void batteriespannungLesen() {
@@ -2020,7 +2056,7 @@ String liveJsonBauen(bool gpsDue, bool rpmDue, bool oilDue, bool tempDue) {
   bool first = true;
 
   jsonBoolFeld(json, first, "online", true);
-  jsonText(json, first, "firmware", "V5.9.7");
+  jsonText(json, first, "firmware", MF35X_FIRMWARE_VERSION);
   jsonText(json, first, "mode", "LIVE");
   jsonRaw(json, first, "wifi_rssi", String(WiFi.RSSI()));
   jsonULongFeld(json, first, "uptime_seconds", millis() / 1000UL);
@@ -2087,8 +2123,13 @@ String liveJsonBauen(bool gpsDue, bool rpmDue, bool oilDue, bool tempDue) {
 
   if (oilDue) {
     jsonFloatFeld(json, first, "oil_pressure", oilPressureBar, 2);
+    jsonFloatFeld(json, first, "oil_pressure_raw_bar", oilPressureBarRaw, 2);
     jsonFloatFeld(json, first, "oil_pressure_voltage", oilPressureVoltage, 4);
     jsonFloatFeld(json, first, "oil_pressure_ohm", oilPressureOhm, 1);
+    jsonRaw(json, first, "oil_pressure_adc_avg", String(oilPressureAdcAvg));
+    jsonRaw(json, first, "oil_pressure_adc_min", String(oilPressureAdcMin));
+    jsonRaw(json, first, "oil_pressure_adc_max", String(oilPressureAdcMax));
+    jsonText(json, first, "oil_pressure_diag_status", mf35xOilDiagStatusText(oilPressureDiagStatus));
   }
 
   if (tempDue) {
@@ -2685,6 +2726,7 @@ void deviceStatusSenden() {
   jsonBoolFeld(json, first, "otaPendingValidation", otaIstPendingVerify());
   jsonText(json, first, "otaManifestUrl", OTA_MANIFEST_URL);
   jsonBoolFeld(json, first, "historySupported", true);
+  jsonBoolFeld(json, first, "oilPressureDiagnosticsSupported", true);
   jsonBoolFeld(json, first, "maxValuesDeviceOwned", true);
   jsonBoolFeld(json, first, "alarmHistoryDeviceOwned", true);
   jsonBoolFeld(json, first, "alarmHistoryOfflineBufferReady", deviceAlarmQueueReady);
@@ -2739,7 +2781,7 @@ void setup() {
 
   Serial.println();
   Serial.println("============================================");
-  Serial.println("MF35X LIVETRACKER V5.9.13 OTA SIGNED");
+  Serial.println("MF35X LIVETRACKER V5.9.17 OTA SIGNED");
   Serial.println("FIREBASE-KONFIG + DYNAMISCHE INTERVALLE");
   Serial.println("ADMIN: ESP32 / WLAN / GPS SOFTWARE-NEUSTART");
   Serial.println("OTA: RSA-SIGNIERT + ZWEITE APP-PARTITION + ROLLBACK-SCHUTZ");

@@ -26,6 +26,12 @@ constexpr unsigned long DEVICE_MAX_UPLOAD_RETRY_MS = 3000UL;
 constexpr unsigned long DEVICE_MAX_REMOTE_MERGE_RETRY_MS = 5000UL;
 constexpr float DEVICE_OIL_PRESSURE_RPM_MIN = 400.0f;
 constexpr unsigned long DEVICE_OIL_PRESSURE_START_DELAY_MS = 5000UL;
+// Last-line plausibility guards for stored maxima only. Live values remain untouched.
+constexpr float DEVICE_MAX_SPEED_PLAUSIBLE_KMH = 120.0f;
+constexpr float DEVICE_MAX_RPM_PLAUSIBLE = 6000.0f;
+// mx_state: high bit = reset transaction pending, low 31 bits = generation.
+constexpr uint32_t DEVICE_MAX_STATE_PENDING_BIT = 0x80000000UL;
+constexpr uint32_t DEVICE_MAX_STATE_GENERATION_MASK = 0x7FFFFFFFUL;
 
 struct DeviceMaxValues {
   float maxSpeed = NAN;
@@ -46,6 +52,8 @@ unsigned long deviceMaxLastPersistMs = 0;
 unsigned long deviceMaxLastUploadAttemptMs = 0;
 unsigned long deviceMaxLastMergeAttemptMs = 0;
 unsigned long deviceOilPressureEngineStartAt = 0;
+uint32_t deviceMaxGeneration = 0;
+bool deviceMaxRecoveredInterruptedReset = false;
 
 constexpr uint32_t DEVICE_ALARM_MAGIC = 0x4D464131UL; // "MFA1"
 constexpr uint16_t DEVICE_ALARM_RECORD_VERSION = 1;
@@ -122,6 +130,10 @@ bool deviceFloatBesserMin(float candidate, float current, bool valid) {
 void deviceMaxLaden() {
   if (!preferencesOk) return;
 
+  const uint32_t state = preferences.getUInt("mx_state", 0U);
+  deviceMaxGeneration = state & DEVICE_MAX_STATE_GENERATION_MASK;
+  const bool resetPending = (state & DEVICE_MAX_STATE_PENDING_BIT) != 0;
+
   deviceMaxValues.validMask = (uint16_t)preferences.getUInt("mx_mask", 0U);
   deviceMaxValues.maxSpeed = preferences.getFloat("mx_spd", NAN);
   deviceMaxValues.maxRpm = preferences.getFloat("mx_rpm", NAN);
@@ -141,6 +153,18 @@ void deviceMaxLaden() {
   if ((deviceMaxValues.validMask & DEVICE_MAX_CYL_TEMP_VALID) && !isfinite(deviceMaxValues.maxCylTemp)) deviceMaxValues.validMask &= ~DEVICE_MAX_CYL_TEMP_VALID;
   if ((deviceMaxValues.validMask & DEVICE_MIN_OIL_PRESSURE_VALID) && !isfinite(deviceMaxValues.minOilPressure)) deviceMaxValues.validMask &= ~DEVICE_MIN_OIL_PRESSURE_VALID;
   if ((deviceMaxValues.validMask & DEVICE_MIN_BATTERY_VALID) && !isfinite(deviceMaxValues.minBattery)) deviceMaxValues.validMask &= ~DEVICE_MIN_BATTERY_VALID;
+
+  // A power cut after the reset transaction marker but before the value erase
+  // is completed here before any Firebase merge can happen.
+  if (resetPending) {
+    deviceMaxValues = DeviceMaxValues{};
+    preferences.putUInt("mx_mask", 0U);
+    preferences.putUInt("mx_state", deviceMaxGeneration);
+    deviceMaxDirty = true;
+    deviceMaxNvsDirty = false;
+    deviceMaxResetTimestampPending = true;
+    deviceMaxRecoveredInterruptedReset = true;
+  }
 }
 
 void deviceMaxSpeichern(bool force = false) {
@@ -158,11 +182,26 @@ void deviceMaxSpeichern(bool force = false) {
   preferences.putFloat("mx_ct", deviceMaxValues.maxCylTemp);
   preferences.putFloat("mn_op", deviceMaxValues.minOilPressure);
   preferences.putFloat("mn_bat", deviceMaxValues.minBattery);
+  // Commit generation last. A pending reset marker is therefore never cleared
+  // until all value fields and the validity mask have been written.
+  preferences.putUInt("mx_state", deviceMaxGeneration & DEVICE_MAX_STATE_GENERATION_MASK);
   deviceMaxLastPersistMs = now;
   deviceMaxNvsDirty = false;
 }
 
+bool deviceMaxPlausibel(uint16_t bit, float value) {
+  if (!isfinite(value)) return false;
+  if (bit == DEVICE_MAX_SPEED_VALID) {
+    return value >= 0.0f && value <= DEVICE_MAX_SPEED_PLAUSIBLE_KMH;
+  }
+  if (bit == DEVICE_MAX_RPM_VALID) {
+    return value >= 0.0f && value <= DEVICE_MAX_RPM_PLAUSIBLE;
+  }
+  return true;
+}
+
 void deviceMaxWertSetzen(uint16_t bit, float& target, float value, bool maximum) {
+  if (!deviceMaxPlausibel(bit, value)) return;
   const bool valid = (deviceMaxValues.validMask & bit) != 0;
   const bool besser = maximum
     ? deviceFloatBesserMax(value, target, valid)
@@ -268,15 +307,51 @@ void deviceMaxFirebaseMergeBearbeiten() {
   String json;
   if (!firebaseGet("tracker/maxValues", json)) return;
 
-  deviceMaxMergeWert(json, "maxSpeed", DEVICE_MAX_SPEED_VALID, deviceMaxValues.maxSpeed, true);
-  deviceMaxMergeWert(json, "maxRpm", DEVICE_MAX_RPM_VALID, deviceMaxValues.maxRpm, true);
-  deviceMaxMergeWert(json, "maxOilTemp", DEVICE_MAX_OIL_TEMP_VALID, deviceMaxValues.maxOilTemp, true);
-  deviceMaxMergeWert(json, "maxCylTemp", DEVICE_MAX_CYL_TEMP_VALID, deviceMaxValues.maxCylTemp, true);
-  deviceMaxMergeWert(json, "minOilPressure", DEVICE_MIN_OIL_PRESSURE_VALID, deviceMaxValues.minOilPressure, false);
-  deviceMaxMergeWert(json, "minBattery", DEVICE_MIN_BATTERY_VALID, deviceMaxValues.minBattery, false);
+  double remoteGenerationNumber = 0.0;
+  const bool hasRemoteGeneration = jsonZahl(json, "generation", remoteGenerationNumber) &&
+                                   isfinite(remoteGenerationNumber) &&
+                                   remoteGenerationNumber >= 0.0;
+  uint32_t remoteGeneration = hasRemoteGeneration
+    ? ((uint32_t)remoteGenerationNumber & DEVICE_MAX_STATE_GENERATION_MASK)
+    : 0U;
+
+  // One-time migration from the legacy generation-less format.
+  if (deviceMaxGeneration == 0U && remoteGeneration == 0U) {
+    deviceMaxMergeWert(json, "maxSpeed", DEVICE_MAX_SPEED_VALID, deviceMaxValues.maxSpeed, true);
+    deviceMaxMergeWert(json, "maxRpm", DEVICE_MAX_RPM_VALID, deviceMaxValues.maxRpm, true);
+    deviceMaxMergeWert(json, "maxOilTemp", DEVICE_MAX_OIL_TEMP_VALID, deviceMaxValues.maxOilTemp, true);
+    deviceMaxMergeWert(json, "maxCylTemp", DEVICE_MAX_CYL_TEMP_VALID, deviceMaxValues.maxCylTemp, true);
+    deviceMaxMergeWert(json, "minOilPressure", DEVICE_MIN_OIL_PRESSURE_VALID, deviceMaxValues.minOilPressure, false);
+    deviceMaxMergeWert(json, "minBattery", DEVICE_MIN_BATTERY_VALID, deviceMaxValues.minBattery, false);
+    deviceMaxGeneration = 1U;
+    deviceMaxNvsDirty = true;
+  } else if (remoteGeneration < deviceMaxGeneration) {
+    // Stale Firebase data from a generation before the last reset is never imported.
+  } else {
+    if (remoteGeneration > deviceMaxGeneration) {
+      // A newer generation may come from the same device after an NVS rollback/replacement.
+      // Start from an empty local set so values from two generations cannot mix.
+      deviceMaxValues = DeviceMaxValues{};
+      deviceMaxGeneration = remoteGeneration;
+      deviceMaxNvsDirty = true;
+    }
+
+    deviceMaxMergeWert(json, "maxSpeed", DEVICE_MAX_SPEED_VALID, deviceMaxValues.maxSpeed, true);
+    deviceMaxMergeWert(json, "maxRpm", DEVICE_MAX_RPM_VALID, deviceMaxValues.maxRpm, true);
+    deviceMaxMergeWert(json, "maxOilTemp", DEVICE_MAX_OIL_TEMP_VALID, deviceMaxValues.maxOilTemp, true);
+    deviceMaxMergeWert(json, "maxCylTemp", DEVICE_MAX_CYL_TEMP_VALID, deviceMaxValues.maxCylTemp, true);
+    deviceMaxMergeWert(json, "minOilPressure", DEVICE_MIN_OIL_PRESSURE_VALID, deviceMaxValues.minOilPressure, false);
+    deviceMaxMergeWert(json, "minBattery", DEVICE_MIN_BATTERY_VALID, deviceMaxValues.minBattery, false);
+  }
+
+  if (deviceMaxGeneration == 0U) {
+    deviceMaxGeneration = 1U;
+    deviceMaxNvsDirty = true;
+  }
 
   deviceMaxFirebaseMerged = true;
   deviceMaxDirty = true;
+  deviceMaxSpeichern(true);
 }
 
 void deviceJsonOptionalFloat(
@@ -305,6 +380,7 @@ String deviceMaxJsonBauen() {
   deviceJsonOptionalFloat(json, first, "maxCylTemp", DEVICE_MAX_CYL_TEMP_VALID, deviceMaxValues.maxCylTemp, 1);
   deviceJsonOptionalFloat(json, first, "minOilPressure", DEVICE_MIN_OIL_PRESSURE_VALID, deviceMaxValues.minOilPressure, 2);
   deviceJsonOptionalFloat(json, first, "minBattery", DEVICE_MIN_BATTERY_VALID, deviceMaxValues.minBattery, 2);
+  jsonULongFeld(json, first, "generation", deviceMaxGeneration);
   jsonBoolFeld(json, first, "deviceOwned", true);
   if (deviceMaxResetTimestampPending) {
     jsonRaw(json, first, "resetAt", "{\".sv\":\"timestamp\"}");
@@ -329,12 +405,28 @@ void deviceMaxUploadBearbeiten() {
 }
 
 void deviceMaxReset() {
+  uint32_t nextGeneration = deviceMaxGeneration >= 1U ? deviceMaxGeneration + 1U : 1U;
+  if (nextGeneration == 0U || nextGeneration > DEVICE_MAX_STATE_GENERATION_MASK) {
+    nextGeneration = 1U;
+  }
+
+  // Transaction marker FIRST: if power disappears anywhere below, boot recovery
+  // sees the pending bit and completes the erase before Firebase is considered.
+  if (preferencesOk) {
+    preferences.putUInt("mx_state", DEVICE_MAX_STATE_PENDING_BIT | nextGeneration);
+  }
+
+  deviceMaxGeneration = nextGeneration;
   deviceMaxValues = DeviceMaxValues{};
   deviceMaxDirty = true;
   deviceMaxNvsDirty = true;
   deviceMaxResetTimestampPending = true;
   deviceMaxFirebaseMerged = true;
+  deviceMaxRecoveredInterruptedReset = false;
   deviceOilPressureEngineStartAt = 0;
+
+  // A reset means "start a new measurement generation now", therefore the
+  // currently valid values may immediately become the first values of it.
   deviceMaxAktualisieren();
   deviceMaxSpeichern(true);
   deviceMaxLastUploadAttemptMs = millis() - DEVICE_MAX_UPLOAD_RETRY_MS;

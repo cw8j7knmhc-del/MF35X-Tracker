@@ -543,6 +543,9 @@ OfflineRaceRecord offlineRecordBauen() {
   rec.capturedMillis = millis();
   rec.state = OFFLINE_STATE_PENDING;
 
+  // Snapshot the diagnostic window using the same deterministic sample key.
+  mf35xOilDiagCapture(rec.bootId, rec.sequence);
+
   const GpsSnapshot gpsDaten = gpsSnapshotLesen();
   const bool gpsGueltig = gpsFixAktuell(gpsDaten);
 
@@ -659,6 +662,9 @@ String offlineRecordJson(const OfflineRaceRecord& rec, bool replay) {
     jsonRaw(json, first, "oil_pressure", "null");
   }
 
+  // Companion data never changes the legacy 64-byte OfflineRaceRecord layout.
+  mf35xOilDiagAppendJson(json, first, rec.bootId, rec.sequence, replay);
+
   if ((rec.flags & OFFLINE_FLAG_OIL_TEMP_VALID) != 0) {
     jsonFloatFeld(json, first, "oil_temp", (double)rec.oilTempDeci / 10.0, 1);
   } else {
@@ -764,6 +770,9 @@ bool offlineRecordDauerhaftPuffern(
   offlinePendingCount++;
   offlineQueuedCount++;
   offlinePsramCacheSpeichern(rec);
+  // Main race data has priority. Diagnostic companion failure must never make
+  // a valid 64-byte race record fail or disappear.
+  mf35xOilDiagPersist(rec.bootId, rec.sequence);
   offlineFsStatusAktualisieren();
   return true;
 }
@@ -777,6 +786,7 @@ void offlineRennMesspunktBearbeiten() {
   if (WiFi.status() == WL_CONNECTED && offlinePendingCount == 0) {
     if (offlineRecordSenden(recordingConfig.raceId, rec, false)) {
       historyOk++;
+      mf35xOilDiagMarkDelivered(rec.bootId, rec.sequence, true);
       return;
     }
     historyFehler++;
@@ -848,6 +858,7 @@ void offlineDrainBearbeiten() {
   }
 
   if (offlinePendingCount > 0) offlinePendingCount--;
+  mf35xOilDiagMarkDelivered(rec.bootId, rec.sequence, offlinePendingCount == 0);
   offlineReplayedCount++;
   historyOk++;
   offlineLastError = "";
