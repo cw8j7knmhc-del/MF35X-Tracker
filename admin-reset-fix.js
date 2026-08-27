@@ -85,6 +85,57 @@ try {
 }
 
 // --------------------------------------------------
+// Maximalwerte: ausschließlich den ESP32 zurücksetzen
+// --------------------------------------------------
+// Wichtig: admin.html enthält noch einen älteren Capture-Handler, der nur
+// tracker/maxValues in Firebase löscht. Dieser Handler würde die NVS-Werte des
+// ESP32 unangetastet lassen. Da diese Datei vor dem Inline-Handler geladen wird,
+// fängt dieser Capture-Handler den Klick zuerst ab und sendet stattdessen den
+// zentralen V5.9.13+-Systembefehl an den ESP32. Der ESP32 setzt damit seine
+// lokalen/NVS-Maximalwerte zurück und spiegelt anschließend den neuen Zustand
+// nach Firebase. Besucher- und Adminseite bleiben dadurch reine Leser der Werte.
+withResetButton(
+  document.getElementById("resetMaxValues"),
+  "Wird zurückgesetzt...",
+  async () => {
+    if (!confirm("Maximalwerte wirklich zurücksetzen? Der ESP32 beginnt danach sofort mit einer neuen Erfassung.")) {
+      return;
+    }
+
+    const requestedAt = Date.now();
+    const requestId =
+      `maxreset_${requestedAt}_${Math.random().toString(36).slice(2, 10)}`;
+
+    try {
+      setStatus(
+        "systemCommandStatus",
+        "Maximalwerte zurücksetzen: Befehl wird an den ESP32 gesendet …",
+        "pending"
+      );
+
+      await set(ref(db, "tracker/config/system_commands/max_values_reset"), {
+        requestId,
+        requestedAt,
+        status: "requested"
+      });
+
+      setStatus(
+        "systemCommandStatus",
+        "Maximalwerte zurücksetzen: Befehl gesendet – wartet auf ESP32.",
+        "pending"
+      );
+    } catch (error) {
+      setStatus(
+        "systemCommandStatus",
+        "Maximalwerte zurücksetzen: Senden fehlgeschlagen – " + error.message,
+        "error"
+      );
+      alert("Fehler beim Senden des Reset-Befehls: " + error.message);
+    }
+  }
+);
+
+// --------------------------------------------------
 // Alarmgrenzen: Standardwerte sichtbar + Firebase
 // --------------------------------------------------
 withResetButton(
