@@ -21,8 +21,8 @@ const DEFAULT_LIMITS = {
 
 const DEFAULT_OUTPUT_CONFIG = {
   speed_enable_kmh: 60,
-  rpm_on: 3200,
-  rpm_off: 3150
+  rpm_on: 2500,
+  rpm_off: 2450
 };
 
 const DEFAULT_INTERVALS = {
