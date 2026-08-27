@@ -657,10 +657,11 @@ async function sendEventToDevices(
     recipients.set(device.token, device);
   }
 
-  // Bestehenden Einzel-Token waehrend der Migration als Fallback behalten.
-  // Sobald dasselbe Token als Geraet registriert ist, verhindert die Map ein Duplikat.
+  // Legacy-Einzel-Token nur verwenden, solange noch KEIN Gerät in der
+  // Mehrgeräteverwaltung registriert ist. Sobald mindestens ein Gerät existiert,
+  // gelten ausschließlich dessen Master-Schalter und Benachrichtigungskategorien.
   const legacyToken = String(env.FCM_TOKEN || "").trim();
-  if (legacyToken && !recipients.has(legacyToken)) {
+  if (devices.length === 0 && legacyToken) {
     recipients.set(legacyToken, {
       name: "Legacy-FCM-Empfänger",
       token: legacyToken
