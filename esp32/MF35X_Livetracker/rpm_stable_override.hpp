@@ -1,11 +1,12 @@
 #pragma once
 
-// Robuste W-Signal-Auswertung fuer V5.9.18.
+// Robuste W-Signal-Auswertung fuer V5.9.19.
 // Ziel:
 // - kurze Stoerflanken und echte Doppel-Flanken nicht als Motordrehzahl werten
 // - bei fehlenden Pulsen eine 2x/3x/4x-Luecke korrekt normalisieren
 // - GPIO11 weiterhin im schnellen, netzunabhaengigen Control-Task steuern
 // - Roh-/Filterzaehler fuer die Rennanalyse bereitstellen
+// - bei Neuerfassung niemals direkt auf eine 0,5x-Doppelflanke einlernen
 
 constexpr uint32_t MF35X_RPM_MIN_PULSABSTAND_US = 500UL;
 constexpr uint8_t MF35X_RPM_PERIODEN_ANZAHL = 21;
@@ -23,6 +24,14 @@ constexpr uint32_t MF35X_RPM_PLAUS_MAX_PROZENT = 108UL;
 constexpr uint8_t MF35X_RPM_MAX_LUECKENFAKTOR = 4;
 constexpr uint8_t MF35X_RPM_NEUERFASSUNG_NACH_FEHLERN = 12;
 
+// Neuerfassung V5.9.19:
+// Eine neue Referenz wird erst nach mehreren zueinander passenden Rohperioden
+// uebernommen. Damit kann eine einzelne Stoerflanke nicht mehr sofort die
+// Referenz halbieren und dadurch eine nahezu doppelte Drehzahl erzeugen.
+constexpr uint8_t MF35X_RPM_NEUERFASSUNG_BESTAETIGUNGEN = 7;
+constexpr uint32_t MF35X_RPM_NEUERFASSUNG_MIN_PROZENT = 88UL;
+constexpr uint32_t MF35X_RPM_NEUERFASSUNG_MAX_PROZENT = 112UL;
+
 // Typischer Fehler aus der Rennaufzeichnung: ein zusaetzlicher Puls liegt etwa
 // in der Mitte zwischen zwei echten W-Pulsen. Er wuerde die Drehzahl nahezu
 // exakt verdoppeln. Solche ~0,5x-Perioden werden separat erkannt und duerfen
@@ -37,6 +46,17 @@ volatile uint8_t mf35xRpmPeriodenIndex = 0;
 volatile uint8_t mf35xRpmPeriodenCount = 0;
 volatile uint32_t mf35xRpmReferenzPeriodeUs = 0;
 volatile uint8_t mf35xRpmFehlerInFolge = 0;
+
+// V5.9.19: geschuetzte Neuerfassung.
+// Die alte Referenz bleibt als Doppelflanken-Schutz erhalten, bis eine neue
+// Periode durch mehrere passende Rohflanken bestaetigt wurde. Falls das Signal
+// zwischendurch wirklich laenger als das RPM-Timeout aussetzt, wird die alte
+// Referenz verworfen und beim Wiederanlauf normal neu gelernt.
+volatile bool mf35xRpmNeuerfassungAktiv = false;
+volatile uint32_t mf35xRpmNeuerfassungAlteReferenzUs = 0;
+volatile uint32_t mf35xRpmNeuerfassungLetzteRohflankeUs = 0;
+volatile uint32_t mf35xRpmNeuerfassungKandidatUs = 0;
+volatile uint8_t mf35xRpmNeuerfassungTreffer = 0;
 
 // Diagnosezaehler. raw = jede FALLING-Flanke am GPIO10,
 // accepted = fuer die Drehzahl angenommene Flanke,
@@ -61,6 +81,119 @@ void IRAM_ATTR mf35xStabileRpmISR() {
   portENTER_CRITICAL_ISR(&mf35xRpmMux);
   mf35xRpmRohImpulseGesamt++;
 
+  // --------------------------------------------------
+  // V5.9.19 - geschuetzte Neuerfassung
+  // --------------------------------------------------
+  if (mf35xRpmNeuerfassungAktiv) {
+    const uint32_t vorherRohUs = mf35xRpmNeuerfassungLetzteRohflankeUs;
+    mf35xRpmNeuerfassungLetzteRohflankeUs = jetztUs;
+
+    if (vorherRohUs == 0) {
+      portEXIT_CRITICAL_ISR(&mf35xRpmMux);
+      return;
+    }
+
+    const uint32_t rohAbstandUs = jetztUs - vorherRohUs;
+
+    // Nach einem echten Signal-/Motorstillstand ist die alte Referenz nicht
+    // mehr verbindlich. Der erste Puls dient dann nur wieder als Zeitanker.
+    if (rohAbstandUs > RPM_SIGNAL_TIMEOUT_US) {
+      mf35xRpmNeuerfassungAlteReferenzUs = 0;
+      mf35xRpmReferenzPeriodeUs = 0;
+      mf35xRpmNeuerfassungKandidatUs = 0;
+      mf35xRpmNeuerfassungTreffer = 0;
+      mf35xRpmPeriodenIndex = 0;
+      mf35xRpmPeriodenCount = 0;
+      mf35xRpmLetzterImpulsUs = jetztUs;
+      letzterRpmImpulsUs = jetztUs;
+      portEXIT_CRITICAL_ISR(&mf35xRpmMux);
+      return;
+    }
+
+    if (rohAbstandUs < MF35X_RPM_MIN_PULSABSTAND_US) {
+      mf35xRpmVerworfeneImpulse++;
+      portEXIT_CRITICAL_ISR(&mf35xRpmMux);
+      return;
+    }
+
+    const uint32_t alteReferenzUs = mf35xRpmNeuerfassungAlteReferenzUs;
+    bool halbeAltePeriode = false;
+
+    if (alteReferenzUs != 0) {
+      const uint32_t doppelMinUs =
+        (alteReferenzUs * MF35X_RPM_DOPPEL_MIN_PROZENT) / 100UL;
+      const uint32_t doppelMaxUs =
+        (alteReferenzUs * MF35X_RPM_DOPPEL_MAX_PROZENT) / 100UL;
+      halbeAltePeriode =
+        rohAbstandUs >= doppelMinUs && rohAbstandUs <= doppelMaxUs;
+    }
+
+    // Genau der im Training gefundene Fehler: ~0,5x der alten Referenz darf
+    // auch waehrend der Neuerfassung niemals zum neuen Zeitmass werden.
+    if (halbeAltePeriode) {
+      mf35xRpmVerworfeneImpulse++;
+      mf35xRpmDoppelImpulse++;
+      portEXIT_CRITICAL_ISR(&mf35xRpmMux);
+      return;
+    }
+
+    if (mf35xRpmNeuerfassungKandidatUs == 0) {
+      mf35xRpmNeuerfassungKandidatUs = rohAbstandUs;
+      mf35xRpmNeuerfassungTreffer = 1;
+      mf35xRpmVerworfeneImpulse++;
+      portEXIT_CRITICAL_ISR(&mf35xRpmMux);
+      return;
+    }
+
+    const uint32_t kandidatUs = mf35xRpmNeuerfassungKandidatUs;
+    const uint32_t kandidatMinUs =
+      (kandidatUs * MF35X_RPM_NEUERFASSUNG_MIN_PROZENT) / 100UL;
+    const uint32_t kandidatMaxUs =
+      (kandidatUs * MF35X_RPM_NEUERFASSUNG_MAX_PROZENT) / 100UL;
+
+    if (rohAbstandUs >= kandidatMinUs && rohAbstandUs <= kandidatMaxUs) {
+      const int32_t differenz =
+        (int32_t)rohAbstandUs - (int32_t)mf35xRpmNeuerfassungKandidatUs;
+      mf35xRpmNeuerfassungKandidatUs =
+        (uint32_t)((int32_t)mf35xRpmNeuerfassungKandidatUs + differenz / 4);
+
+      if (mf35xRpmNeuerfassungTreffer < 255U) {
+        mf35xRpmNeuerfassungTreffer++;
+      }
+    } else {
+      // Ein einzelner abweichender Rohabstand darf die Neuerfassung nicht
+      // abschliessen. Er startet lediglich einen neuen Kandidaten.
+      mf35xRpmNeuerfassungKandidatUs = rohAbstandUs;
+      mf35xRpmNeuerfassungTreffer = 1;
+    }
+
+    if (mf35xRpmNeuerfassungTreffer >= MF35X_RPM_NEUERFASSUNG_BESTAETIGUNGEN) {
+      // Erst jetzt ist die neue Referenz verbindlich. Der aktuelle Puls wird
+      // wieder als Zeitanker uebernommen; die normalen Medianperioden muessen
+      // danach wie beim Start mindestens MF35X_RPM_MIN_PERIODEN aufbauen.
+      mf35xRpmReferenzPeriodeUs = mf35xRpmNeuerfassungKandidatUs;
+      mf35xRpmPeriodenIndex = 0;
+      mf35xRpmPeriodenCount = 0;
+      mf35xRpmFehlerInFolge = 0;
+      mf35xRpmLetzterImpulsUs = jetztUs;
+      letzterRpmImpulsUs = jetztUs;
+      rpmImpulse++;
+      mf35xRpmAkzeptierteImpulseGesamt++;
+      mf35xRpmNeuerfassungen++;
+
+      mf35xRpmNeuerfassungAktiv = false;
+      mf35xRpmNeuerfassungAlteReferenzUs = 0;
+      mf35xRpmNeuerfassungLetzteRohflankeUs = 0;
+      mf35xRpmNeuerfassungKandidatUs = 0;
+      mf35xRpmNeuerfassungTreffer = 0;
+    } else {
+      mf35xRpmVerworfeneImpulse++;
+    }
+
+    portEXIT_CRITICAL_ISR(&mf35xRpmMux);
+    return;
+  }
+
   const uint32_t vorherUs = mf35xRpmLetzterImpulsUs;
 
   // Erster Puls dient nur als Zeitanker.
@@ -82,7 +215,7 @@ void IRAM_ATTR mf35xStabileRpmISR() {
     const uint32_t referenzUs = mf35xRpmReferenzPeriodeUs;
 
     if (referenzUs == 0) {
-      // Kurze Einlernphase nach Start / echter Neuerfassung.
+      // Kurze Einlernphase nach Start / echtem Signalstillstand.
       gueltig = true;
     } else {
       const uint32_t minUs =
@@ -156,19 +289,21 @@ void IRAM_ATTR mf35xStabileRpmISR() {
         mf35xRpmFehlerInFolge++;
       }
 
-      // Falls die echte Drehzahl / Signalform doch sehr stark gewechselt hat,
-      // nicht dauerhaft an einer alten Referenz festhalten. Nach mehreren
-      // aufeinanderfolgenden unplausiblen Flanken wird sauber neu eingelernt.
+      // V5.9.19: Die alte Referenz wird NICHT mehr sofort auf 0 gesetzt.
+      // Stattdessen startet eine bestaetigte Neuerfassung. Dadurch kann die
+      // naechste einzelne Stoerflanke nicht mehr zur falschen Referenz werden.
       if (mf35xRpmFehlerInFolge >= MF35X_RPM_NEUERFASSUNG_NACH_FEHLERN) {
-        mf35xRpmReferenzPeriodeUs = 0;
+        mf35xRpmNeuerfassungAktiv = true;
+        mf35xRpmNeuerfassungAlteReferenzUs = mf35xRpmReferenzPeriodeUs;
+        mf35xRpmNeuerfassungLetzteRohflankeUs = jetztUs;
+        mf35xRpmNeuerfassungKandidatUs = 0;
+        mf35xRpmNeuerfassungTreffer = 0;
+
         mf35xRpmPeriodenIndex = 0;
         mf35xRpmPeriodenCount = 0;
         mf35xRpmFehlerInFolge = 0;
         mf35xRpmLetzterImpulsUs = jetztUs;
         letzterRpmImpulsUs = jetztUs;
-        rpmImpulse++;
-        mf35xRpmAkzeptierteImpulseGesamt++;
-        mf35xRpmNeuerfassungen++;
       }
     }
   }
@@ -246,10 +381,12 @@ void mf35xStabileDrehzahlAktualisieren() {
   uint32_t perioden[MF35X_RPM_PERIODEN_ANZAHL] = {};
   uint8_t anzahl = 0;
   uint32_t letzterImpulsUs = 0;
+  bool neuerfassungAktiv = false;
 
   portENTER_CRITICAL(&mf35xRpmMux);
   anzahl = mf35xRpmPeriodenCount;
   letzterImpulsUs = mf35xRpmLetzterImpulsUs;
+  neuerfassungAktiv = mf35xRpmNeuerfassungAktiv;
 
   for (uint8_t i = 0; i < anzahl; i++) {
     perioden[i] = mf35xRpmPeriodenUs[i];
@@ -259,6 +396,7 @@ void mf35xStabileDrehzahlAktualisieren() {
   const uint32_t jetztUs = micros();
 
   rpmSignalOk =
+    !neuerfassungAktiv &&
     letzterImpulsUs != 0 &&
     anzahl >= MF35X_RPM_MIN_PERIODEN &&
     (uint32_t)(jetztUs - letzterImpulsUs) <= RPM_SIGNAL_TIMEOUT_US;
@@ -329,8 +467,14 @@ void mf35xStabilenSchaltausgangAktualisieren() {
     gpsDaten.speedValid &&
     gpsDaten.speedKmh >= cfg.speedEnableKmh;
 
-  // GPIO11 darf ausschliesslich die plausibilisierte schnelle Drehzahl sehen.
-  if (!speedFreigabe || !rpmSignalOk || !isfinite(mf35xRpmSchnell)) {
+  bool neuerfassungAktiv = false;
+  portENTER_CRITICAL(&mf35xRpmMux);
+  neuerfassungAktiv = mf35xRpmNeuerfassungAktiv;
+  portEXIT_CRITICAL(&mf35xRpmMux);
+
+  // GPIO11 darf ausschliesslich eine voll bestaetigte, plausibilisierte
+  // Drehzahl sehen. Waehrend einer Neuerfassung bleibt der Ausgang sicher LOW.
+  if (!speedFreigabe || neuerfassungAktiv || !rpmSignalOk || !isfinite(mf35xRpmSchnell)) {
     schaltausgangAktiv = false;
   } else {
     if (!schaltausgangAktiv && mf35xRpmSchnell >= cfg.rpmOn) {
@@ -378,7 +522,7 @@ void mf35xAttachStableRpmInterrupt(int pin, int mode) {
 
   if (ergebnis == pdPASS) {
     Serial.println(
-      "Drehzahlfilter V5.9.18: Median-21 + +/-8% + 0,5x-Doppelflankensperre"
+      "Drehzahlfilter V5.9.19: Median-21 + +/-8% + geschuetzte Neuerfassung"
     );
   } else {
     controlTaskHandle = nullptr;
