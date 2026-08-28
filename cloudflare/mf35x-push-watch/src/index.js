@@ -276,10 +276,7 @@ async function checkSensorAlarms(env, limits) {
   }
 
   const oldState = await readSensorState(env);
-  const newState = {
-    ...oldState,
-    updatedAt: now
-  };
+  const newState = { ...oldState };
 
   const rpm = numberValue(live.rpm);
   const battery = numberValue(live.battery_v);
@@ -352,7 +349,24 @@ async function checkSensorAlarms(env, limits) {
     }
   }
 
-  await env.STATE.put(SENSOR_STATE_KEY, JSON.stringify(newState));
+  // Cloudflare KV nur beschreiben, wenn sich ein fuer die Alarmierung
+  // relevanter Zustand tatsaechlich geaendert hat. Der fruehere Code schrieb
+  // bei jedem 10-Sekunden-Poll und erzeugte dadurch bis zu 8.640 Writes/Tag.
+  if (sensorStateChanged(oldState, newState)) {
+    newState.updatedAt = now;
+    await env.STATE.put(SENSOR_STATE_KEY, JSON.stringify(newState));
+  }
+}
+
+function sensorStateChanged(oldState, newState) {
+  return (
+    oldState.battery !== newState.battery ||
+    oldState.oilPressure !== newState.oilPressure ||
+    oldState.oilTemp !== newState.oilTemp ||
+    oldState.cylinderTemp !== newState.cylinderTemp ||
+    (numberValue(oldState.engineRunSinceMs) || 0) !==
+      (numberValue(newState.engineRunSinceMs) || 0)
+  );
 }
 
 async function evaluateAndNotify(
