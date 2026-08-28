@@ -1,14 +1,12 @@
 /*
-  MF35X Livetracker V5.9.18 OTA SIGNED
-  - robuste Drehzahlauswertung am W-Anschluss mit Median + Plausibilitaetsfilter
-  - zusaetzliche 0,5x-Doppelflankensperre gegen nahezu exakt doppelte RPM
-  - schnelle GPIO11-Steuerung verwendet ausschliesslich plausibilisierte RPM
-  - RPM-Roh-/Filter-/Verwerfungsdiagnose in der Rennaufzeichnung
-  - robuster ESP32-Maximalwert/Reset-Patch
-  - Oeldruck-Rohdiagnose fuer Rennaufzeichnung
+  MF35X Livetracker V5.9.21 CONTROL-RESTORE
+  - GPIO10/RPM/GPIO11 wieder auf direktem V5.9.15-Steuerpfad
+  - GPIO11 bleibt im eigenen netzunabhaengigen 10-ms-Control-Task
+  - aktuelle GPS/Firebase/Website/OTA-/Offline-Basisfunktionen bleiben erhalten
+  - aggressive V5.9.18/V5.9.19 RPM-Renndiagnose ist bewusst nicht Teil dieses Builds
+  - Oeldruck-Rohdiagnose bleibt erhalten, ist aber der Fahrfunktion nachgeordnet
 
-  Diese .ino-Datei bleibt absichtlich minimal.
-  Der eigentliche Tracker-Code liegt in MF35X_Livetracker_core.hpp.
+  Prioritaet: relevante Fahrfunktionen vor Rennaufzeichnung/Diagnose.
 */
 
 #include <Arduino.h>
@@ -31,13 +29,11 @@
 
 void mf35xAttachStableRpmInterrupt(int pin, int mode);
 
-// Der Offline-Rennpuffer liegt innerhalb des Core-Headers. Dieser reine
-// RAM-Snapshot-Hook wird dort direkt nach dem Basissample aufgerufen und erst
-// weiter unten nach Einbindung der bestehenden RPM-Diagnose definiert.
+// offline_race_buffer.hpp ruft diesen Hook auf. In diesem Control-Restore ist
+// die RPM-Renndiagnose absichtlich deaktiviert; die Basis-Rennaufzeichnung
+// darf deshalb weiterlaufen, ohne die Fahrfunktion zu beeinflussen.
 void mf35xRpmDiagPrepare(uint32_t sequence);
 
-// Core-setup()/loop() umbenennen, damit die vorbereiteten Zusatzfunktionen
-// sauber vor/nach dem unveraenderten Kern eingehangen werden koennen.
 #define setup mf35xCoreSetup
 #define loop mf35xCoreLoop
 #define attachInterrupt(pin, func, mode) \
@@ -49,24 +45,24 @@ void mf35xRpmDiagPrepare(uint32_t sequence);
 
 #include "rpm_stable_override.hpp"
 
+void mf35xRpmDiagPrepare(uint32_t sequence) {
+  (void)sequence;
+}
+
 // Kleine JSON-Hilfe fuer vorzeichenbehaftete ADS1115-Rohwerte.
 void jsonLongFeld(String& json, bool& erstesFeld, const char* key, long wert) {
   jsonRaw(json, erstesFeld, key, String(wert));
 }
 
 #include "v5917_patch.hpp"
-#include "v5918_rpm_diagnostics.hpp"
-#include "v5920_safe_race_sync.hpp"
 
 void setup() {
   mf35xCoreSetup();
   mf35xV5917PatchSetup();
-  mf35xV5918RpmDiagSetup();
 }
 
 void loop() {
   const uint32_t raceSequenceBefore = offlineSampleSequence;
   mf35xCoreLoop();
   mf35xV5917PatchLoop(raceSequenceBefore);
-  mf35xV5920SafeRpmDiagLoop(raceSequenceBefore);
 }
