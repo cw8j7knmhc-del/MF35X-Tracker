@@ -1,11 +1,10 @@
 /*
-  MF35X Livetracker V5.9.18 OTA SIGNED
-  - robuste Drehzahlauswertung am W-Anschluss mit Median + Plausibilitaetsfilter
-  - zusaetzliche 0,5x-Doppelflankensperre gegen nahezu exakt doppelte RPM
-  - schnelle GPIO11-Steuerung verwendet ausschliesslich plausibilisierte RPM
-  - RPM-Roh-/Filter-/Verwerfungsdiagnose in der Rennaufzeichnung
-  - robuster ESP32-Maximalwert/Reset-Patch
-  - Oeldruck-Rohdiagnose fuer Rennaufzeichnung
+  MF35X Livetracker V5.9.21 OTA SIGNED - PREPARED
+  - V5.9.20 sichere, synchronisierte Renn-/RPM-Diagnose als Basis
+  - Rennsample-Erzeugung in eigenem FreeRTOS-Task, unabhaengig von Firebase/HTTP/LTE
+  - Basissample + Oeldruck- + RPM/GPIO11-Diagnose gemeinsam im PSRAM-Ring
+  - LittleFS bleibt die dauerhafte Queue; Netzwerk ist nur noch nachgelagerter Verbraucher
+  - bestehende RPM-/GPIO11-/GPS-/Sensorlogik unveraendert
 
   Diese .ino-Datei bleibt absichtlich minimal.
   Der eigentliche Tracker-Code liegt in MF35X_Livetracker_core.hpp.
@@ -31,9 +30,8 @@
 
 void mf35xAttachStableRpmInterrupt(int pin, int mode);
 
-// Der Offline-Rennpuffer liegt innerhalb des Core-Headers. Dieser reine
-// RAM-Snapshot-Hook wird dort direkt nach dem Basissample aufgerufen und erst
-// weiter unten nach Einbindung der bestehenden RPM-Diagnose definiert.
+// Der alte V5.9.20-Hook bleibt fuer den sicheren Fallback vorhanden, falls der
+// neue Async-Capture-Task ausnahmsweise nicht gestartet werden kann.
 void mf35xRpmDiagPrepare(uint32_t sequence);
 
 // Core-setup()/loop() umbenennen, damit die vorbereiteten Zusatzfunktionen
@@ -57,16 +55,36 @@ void jsonLongFeld(String& json, bool& erstesFeld, const char* key, long wert) {
 #include "v5917_patch.hpp"
 #include "v5918_rpm_diagnostics.hpp"
 #include "v5920_safe_race_sync.hpp"
+#include "v5921_async_race_logger.hpp"
 
 void setup() {
   mf35xCoreSetup();
   mf35xV5917PatchSetup();
   mf35xV5918RpmDiagSetup();
+  mf35xAsyncRaceLoggerSetup();
 }
 
 void loop() {
+  // Vor jedem moeglicherweise blockierenden Netzabschnitt vorhandene Async-
+  // Samples zuerst in die dauerhafte LittleFS-Queue uebernehmen.
+  mf35xAsyncRaceLoggerSyncConfig();
+  mf35xAsyncRaceLoggerFlush();
+
   const uint32_t raceSequenceBefore = offlineSampleSequence;
   mf35xCoreLoop();
-  mf35xV5917PatchLoop(raceSequenceBefore);
-  mf35xV5920SafeRpmDiagLoop(raceSequenceBefore);
+
+  // Firebase-Konfiguration kann im Core geaendert worden sein.
+  mf35xAsyncRaceLoggerSyncConfig();
+
+  if (mf35xAsyncRaceLoggerActive()) {
+    // Alles, was waehrend eines HTTP-/LTE-Blocks im separaten Capture-Task
+    // entstanden ist, jetzt dauerhaft sichern. Netzwerk darf danach wieder
+    // beliebig langsam sein, ohne das 1-60-s-Aufzeichnungsraster zu beeinflussen.
+    mf35xAsyncRaceLoggerFlush();
+    mf35xAsyncRaceLoggerMaintenance();
+  } else {
+    // Sicherer Fallback auf den bisherigen, bewaehrten V5.9.20-Pfad.
+    mf35xV5917PatchLoop(raceSequenceBefore);
+    mf35xV5920SafeRpmDiagLoop(raceSequenceBefore);
+  }
 }
