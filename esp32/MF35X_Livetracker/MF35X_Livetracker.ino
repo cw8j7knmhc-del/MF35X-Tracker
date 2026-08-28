@@ -1,7 +1,9 @@
 /*
-  MF35X Livetracker V5.9.17 OTA SIGNED
+  MF35X Livetracker V5.9.18 OTA SIGNED
   - robuste Drehzahlauswertung am W-Anschluss mit Median + Plausibilitaetsfilter
-  - schnelle GPIO11-Steuerung bleibt netzunabhaengig
+  - zusaetzliche 0,5x-Doppelflankensperre gegen nahezu exakt doppelte RPM
+  - schnelle GPIO11-Steuerung verwendet ausschliesslich plausibilisierte RPM
+  - RPM-Roh-/Filter-/Verwerfungsdiagnose in der Rennaufzeichnung
   - robuster ESP32-Maximalwert/Reset-Patch
   - Oeldruck-Rohdiagnose fuer Rennaufzeichnung
 
@@ -29,8 +31,8 @@
 
 void mf35xAttachStableRpmInterrupt(int pin, int mode);
 
-// Core-setup()/loop() umbenennen, damit V5.9.17 die zwei vorbereiteten
-// Zusatzfunktionen sauber vor/nach dem unveraenderten Kern einhaengen kann.
+// Core-setup()/loop() umbenennen, damit die vorbereiteten Zusatzfunktionen
+// sauber vor/nach dem unveraenderten Kern eingehangen werden koennen.
 #define setup mf35xCoreSetup
 #define loop mf35xCoreLoop
 #define attachInterrupt(pin, func, mode) \
@@ -48,14 +50,17 @@ void jsonLongFeld(String& json, bool& erstesFeld, const char* key, long wert) {
 }
 
 #include "v5917_patch.hpp"
+#include "v5918_rpm_diagnostics.hpp"
 
 void setup() {
   mf35xCoreSetup();
   mf35xV5917PatchSetup();
+  mf35xV5918RpmDiagSetup();
 }
 
 void loop() {
   const uint32_t raceSequenceBefore = offlineSampleSequence;
   mf35xCoreLoop();
   mf35xV5917PatchLoop(raceSequenceBefore);
+  mf35xV5918RpmDiagLoop(raceSequenceBefore);
 }
