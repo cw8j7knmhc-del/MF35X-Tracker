@@ -1,0 +1,75 @@
+name: Test race logging safety branch
+
+on:
+  push:
+    branches:
+      - 'test/race-logging-v5920-safe'
+    paths:
+      - 'esp32/**'
+      - 'admin-reset-fix.js'
+      - '.github/workflows/test-race-logging-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-and-guard:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify critical control files unchanged from main
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git diff --exit-code origin/main -- \
+            esp32/MF35X_Livetracker/MF35X_Livetracker_core.hpp \
+            esp32/MF35X_Livetracker/rpm_stable_override.hpp \
+            esp32/MF35X_Livetracker/device_metrics_alarm.hpp \
+            esp32/MF35X_Livetracker/v5917_patch.hpp \
+            esp32/MF35X_Livetracker/v5918_rpm_diagnostics.hpp \
+            esp32/MF35X_Livetracker/firmware_version.h \
+            esp32/MF35X_Livetracker/ota_public_key.h \
+            esp32/MF35X_Livetracker/rollback_hook.cpp
+
+      - name: Check admin JavaScript syntax
+        run: node --input-type=module --check < admin-reset-fix.js
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile ESP32-S3 application only
+        run: |
+          rm -rf build
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
+            --output-dir build \
+            esp32/MF35X_Livetracker
+
+      - name: Confirm no OTA publication files changed
+        run: |
+          set -euo pipefail
+          git diff --exit-code origin/main -- \
+            firmware/manifest.json \
+            firmware/MF35X_Livetracker_signed.bin
