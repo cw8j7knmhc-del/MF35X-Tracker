@@ -1,0 +1,60 @@
+name: Validate V5.9.21 GPIO11 control restore
+
+on:
+  push:
+    branches:
+      - prepared/v5.9.21-gpio11-control-restore
+    paths:
+      - 'esp32/**'
+      - '.github/workflows/validate-v5921-gpio11-control-restore.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile ESP32-S3
+        run: |
+          rm -rf build
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
+            --warnings all \
+            --output-dir build \
+            esp32/MF35X_Livetracker
+
+      - name: Verify critical control path
+        run: |
+          grep -q 'MF35X_FIRMWARE_VERSION "V5.9.21"' esp32/MF35X_Livetracker/firmware_version.h
+          grep -q 'MF35X_RPM_PERIODEN_ANZAHL = 8' esp32/MF35X_Livetracker/rpm_stable_override.hpp
+          grep -q 'mf35xRpmSchnell >= cfg.rpmOn' esp32/MF35X_Livetracker/rpm_stable_override.hpp
+          grep -q 'mf35xRpmSchnell < cfg.rpmOff' esp32/MF35X_Livetracker/rpm_stable_override.hpp
+          grep -q 'gpsDaten.speedKmh >= cfg.speedEnableKmh' esp32/MF35X_Livetracker/rpm_stable_override.hpp
+          if grep -q 'neuerfassungAktiv' esp32/MF35X_Livetracker/rpm_stable_override.hpp; then
+            echo 'FEHLER: Neuerfassungs-Sperre ist im Control-Restore noch vorhanden.'
+            exit 1
+          fi
+          if grep -q 'v5918_rpm_diagnostics.hpp' esp32/MF35X_Livetracker/MF35X_Livetracker.ino; then
+            echo 'FEHLER: RPM-Renndiagnose darf den Control-Restore nicht beeinflussen.'
+            exit 1
+          fi
