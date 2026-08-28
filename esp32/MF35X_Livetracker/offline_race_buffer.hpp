@@ -771,6 +771,10 @@ bool offlineRecordDauerhaftPuffern(
 void offlineRennMesspunktBearbeiten() {
   const OfflineRaceRecord rec = offlineRecordBauen();
 
+  // Test-Branch: Diagnose-Snapshot unmittelbar nach dem Basissample nur im RAM
+  // erfassen. Die bestehende Sende-/Pufferlogik bleibt vollstaendig unveraendert.
+  mf35xRpmDiagPrepare(rec.sequence);
+
   // Solange kein Rueckstau existiert, direkt senden. Ein HTTP-Timeout kann
   // nicht zu einem Duplikat fuehren, weil dieselbe deterministische ID bei
   // einem spaeteren Versuch per PUT ueberschrieben wird.

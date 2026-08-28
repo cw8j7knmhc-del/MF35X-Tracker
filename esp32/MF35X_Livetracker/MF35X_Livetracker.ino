@@ -31,6 +31,11 @@
 
 void mf35xAttachStableRpmInterrupt(int pin, int mode);
 
+// Der Offline-Rennpuffer liegt innerhalb des Core-Headers. Dieser reine
+// RAM-Snapshot-Hook wird dort direkt nach dem Basissample aufgerufen und erst
+// weiter unten nach Einbindung der bestehenden RPM-Diagnose definiert.
+void mf35xRpmDiagPrepare(uint32_t sequence);
+
 // Core-setup()/loop() umbenennen, damit die vorbereiteten Zusatzfunktionen
 // sauber vor/nach dem unveraenderten Kern eingehangen werden koennen.
 #define setup mf35xCoreSetup
@@ -51,6 +56,7 @@ void jsonLongFeld(String& json, bool& erstesFeld, const char* key, long wert) {
 
 #include "v5917_patch.hpp"
 #include "v5918_rpm_diagnostics.hpp"
+#include "v5920_safe_race_sync.hpp"
 
 void setup() {
   mf35xCoreSetup();
@@ -62,5 +68,5 @@ void loop() {
   const uint32_t raceSequenceBefore = offlineSampleSequence;
   mf35xCoreLoop();
   mf35xV5917PatchLoop(raceSequenceBefore);
-  mf35xV5918RpmDiagLoop(raceSequenceBefore);
+  mf35xV5920SafeRpmDiagLoop(raceSequenceBefore);
 }
