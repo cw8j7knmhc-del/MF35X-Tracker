@@ -1,5 +1,14 @@
 import { getApps, getApp, initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getDatabase, ref, set, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import {
+  getDatabase,
+  ref,
+  set,
+  get,
+  query,
+  orderByChild,
+  startAt,
+  endAt
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 const DEFAULT_LIMITS = {
@@ -62,6 +71,196 @@ function withResetButton(button, workingText, action) {
       button.textContent = originalText;
     }
   }, true);
+}
+
+function raceCsvNumber(value) {
+  if (value === undefined || value === null || value === "") return "";
+  const number = Number(value);
+  return Number.isFinite(number) ? String(number).replace(".", ",") : "";
+}
+
+function raceCsvBoolean(value) {
+  return value === true ? "JA" : value === false ? "NEIN" : "";
+}
+
+function raceCsvEscape(value) {
+  const text = String(value ?? "");
+  return /[;"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function raceSafeFilename(text) {
+  return String(text).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim() || "MF35X_Rennen";
+}
+
+function raceFormatDateTime(timestamp) {
+  const value = Number(timestamp);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  return new Date(value).toLocaleString("de-AT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
+async function exportDetailedRaceCsv() {
+  const raceSelect = document.getElementById("raceSelect");
+  const fromInput = document.getElementById("fromTime");
+  const toInput = document.getElementById("toTime");
+  const raceId = raceSelect?.value || "";
+
+  if (!raceId) {
+    alert("Bitte zuerst eine Rennaufzeichnung auswählen.");
+    return;
+  }
+
+  let start = fromInput?.value ? new Date(fromInput.value).getTime() : NaN;
+  let stop = toInput?.value ? new Date(toInput.value).getTime() : NaN;
+
+  const metaSnapshot = await get(ref(db, `tracker/races/${raceId}`));
+  const meta = metaSnapshot.val() || {};
+
+  if (!Number.isFinite(start)) start = Number(meta.startedAt || 0);
+  if (!Number.isFinite(stop)) stop = Number(meta.stoppedAt || Date.now());
+
+  if (!Number.isFinite(start) || !Number.isFinite(stop) || stop <= start) {
+    throw new Error("Ungültiger Zeitraum für den CSV-Export");
+  }
+
+  const samplesQuery = query(
+    ref(db, `tracker/races/${raceId}/samples`),
+    orderByChild("timestamp"),
+    startAt(start),
+    endAt(stop)
+  );
+  const samplesSnapshot = await get(samplesQuery);
+  const raw = samplesSnapshot.val() || {};
+  const samples = Object.values(raw)
+    .filter(sample => sample && Number.isFinite(Number(sample.timestamp)))
+    .sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+
+  if (!samples.length) {
+    alert("Für den ausgewählten Zeitraum sind keine Rennmesswerte vorhanden.");
+    return;
+  }
+
+  const header = [
+    "Zeitpunkt",
+    "timestamp",
+    "Zylinderkopftemperatur_C",
+    "Motoroeltemperatur_C",
+    "Getriebeoeltemperatur_C",
+    "Oeldruck_final_bar",
+    "Drehzahl_Anzeige_Umin",
+    "Geschwindigkeit_kmh",
+    "Batterie_V",
+    "GPS_HDOP",
+    "GPS_Satelliten",
+    "WLAN_RSSI_dBm",
+    "GPIO11_switch_output",
+    "GPIO11_Diagnose",
+
+    "Oeldruck_AIN1_ADC",
+    "Oeldruck_AIN1_mV",
+    "Oeldruck_Geber_Ohm",
+    "Oeldruck_vor_Begrenzung_bar",
+    "Oeldruck_Diagnose",
+    "Oeldruck_Festwiderstand_Ohm",
+
+    "RPM_raw_ungefiltert_Umin",
+    "RPM_gefiltert_schnell_Umin",
+    "RPM_display_Umin",
+    "RPM_raw_edges_total",
+    "RPM_accepted_edges_total",
+    "RPM_rejected_edges_total",
+    "RPM_double_edges_total",
+    "RPM_reacquire_total",
+    "RPM_reference_period_us",
+    "RPM_rejected_seit_letztem_Sample",
+    "RPM_double_seit_letztem_Sample",
+    "RPM_period_count",
+    "RPM_filter_locked",
+    "RPM_signal_ok",
+
+    "Sample_ID",
+    "Sample_Boot_ID",
+    "Sample_Sequence",
+    "Capture_Uptime_ms",
+    "Capture_Time_Valid",
+    "Timestamp_Source",
+    "Offline_nachgesendet"
+  ];
+
+  const rows = samples.map(sample => {
+    const gpio11 = typeof sample.gpio11 === "boolean"
+      ? sample.gpio11
+      : typeof sample.switch_output === "boolean"
+        ? sample.switch_output
+        : null;
+
+    return [
+      raceFormatDateTime(sample.timestamp),
+      sample.timestamp,
+      raceCsvNumber(sample.cylinder_temp),
+      raceCsvNumber(sample.oil_temp),
+      raceCsvNumber(sample.gear_oil_temp),
+      raceCsvNumber(sample.oil_pressure),
+      raceCsvNumber(sample.rpm),
+      raceCsvNumber(sample.speed_kmh),
+      raceCsvNumber(sample.battery_v),
+      raceCsvNumber(sample.hdop),
+      raceCsvNumber(sample.satellites),
+      raceCsvNumber(sample.wifi_rssi),
+      raceCsvBoolean(sample.switch_output),
+      raceCsvBoolean(gpio11),
+
+      raceCsvNumber(sample.oil_pressure_raw_adc),
+      raceCsvNumber(sample.oil_pressure_mv),
+      raceCsvNumber(sample.oil_pressure_ohm),
+      raceCsvNumber(sample.oil_pressure_raw_bar),
+      sample.oil_pressure_diag || sample.oil_pressure_diag_status || "",
+      raceCsvNumber(sample.oil_pressure_fixed_resistor_ohm),
+
+      raceCsvNumber(sample.rpm_raw_unfiltered),
+      raceCsvNumber(sample.rpm_filtered),
+      raceCsvNumber(sample.rpm_display),
+      raceCsvNumber(sample.rpm_raw_edges_total),
+      raceCsvNumber(sample.rpm_accepted_edges_total),
+      raceCsvNumber(sample.rpm_rejected_edges_total),
+      raceCsvNumber(sample.rpm_double_edges_total),
+      raceCsvNumber(sample.rpm_reacquire_total),
+      raceCsvNumber(sample.rpm_reference_period_us),
+      raceCsvNumber(sample.rpm_rejected_since_last_sample),
+      raceCsvNumber(sample.rpm_double_since_last_sample),
+      raceCsvNumber(sample.rpm_period_count),
+      raceCsvBoolean(sample.rpm_filter_locked),
+      raceCsvBoolean(sample.rpm_signal_ok),
+
+      sample.sample_id || "",
+      raceCsvNumber(sample.sample_boot_id),
+      raceCsvNumber(sample.sample_sequence),
+      raceCsvNumber(sample.captured_uptime_ms),
+      raceCsvBoolean(sample.capture_time_valid),
+      sample.timestamp_source || "",
+      raceCsvBoolean(sample.buffered_replay)
+    ];
+  });
+
+  const csv = "\ufeff" + [header, ...rows]
+    .map(row => row.map(raceCsvEscape).join(";"))
+    .join("\r\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${raceSafeFilename(meta.name || raceId)}_Auswertung_Diagnose.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Den Hinweis in der Adminoberfläche an den tatsächlichen Firmware-Standard angleichen.
@@ -216,3 +415,30 @@ withResetButton(
     }
   }
 );
+
+// --------------------------------------------------
+// Renn-CSV: vollständiger Diagnoseexport
+// --------------------------------------------------
+// admin.js normalisiert für Diagramme bewusst nur wenige Standardfelder.
+// Der Capture-Handler liest deshalb die Original-Samples direkt aus Firebase,
+// damit RPM-Rohdaten, Filterzähler, GPIO11 und Öldruckdiagnose nicht verloren
+// gehen. Die Besucheransicht bleibt davon vollständig unberührt.
+const detailedExportButton = document.getElementById("exportCsv");
+detailedExportButton?.addEventListener("click", async event => {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  const originalText = detailedExportButton.textContent;
+  detailedExportButton.disabled = true;
+  detailedExportButton.textContent = "CSV wird erstellt...";
+
+  try {
+    await exportDetailedRaceCsv();
+  } catch (error) {
+    console.error("Diagnose-CSV fehlgeschlagen:", error);
+    alert("CSV-Export fehlgeschlagen: " + error.message);
+  } finally {
+    detailedExportButton.disabled = false;
+    detailedExportButton.textContent = originalText;
+  }
+}, true);
