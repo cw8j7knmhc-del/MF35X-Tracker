@@ -63,6 +63,14 @@ Der Worker nutzt innerhalb dieses Scheduled Runs `scheduler.wait(10000)` und pr�
 
 ESP32 Online/Offline wird weiterhin einmal pro Minute bewertet. Die Offline-Schwelle bleibt 45 Sekunden.
 
+## Cloudflare-KV-Nutzung
+
+Die sechs Sensorprüfungen pro Minute lesen den gespeicherten Alarmzustand aus KV, schreiben ihn aber **nur dann zurück, wenn sich ein relevanter Zustand tatsächlich geändert hat**. Dazu zählen Warn-/Alarm-/OK-Wechsel sowie Start/Stop des Motors für die Öldruckfreigabe.
+
+Wichtig: `updatedAt` darf nicht bei jedem 10-Sekunden-Poll einen KV-Write erzwingen. Der frühere Stand erzeugte dadurch bis zu 8.640 KV-Schreibvorgänge pro Tag und konnte das Free-Tier-Limit sehr schnell überschreiten.
+
+ESP32 Online/Offline wird ebenfalls nur beim ersten Initialisieren bzw. bei einem echten Zustandswechsel in KV geschrieben. Geräte-Registrierung und Änderungen an Push-Einstellungen erzeugen nur bei Benutzeraktionen KV-Writes.
+
 ## Verhalten beim ersten Start
 
 Beim ersten Auftreten eines noch unbekannten Sensor- oder ESP32-Zustands wird nur der Ausgangszustand gespeichert. Dadurch entstehen beim Deployment keine unerwünschten Startmeldungen.
