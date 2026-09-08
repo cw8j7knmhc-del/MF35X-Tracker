@@ -6,29 +6,22 @@
 #include <string.h>
 
 // ==================================================
-// NAECHSTER USB-STAND - PUNKT 1
-// DETERMINISTISCHE RENNAUFZEICHNUNG
+// NAECHSTER USB-STAND - PUNKT 1 + PUNKT 2
+// DETERMINISTISCHE + ATOMARE RENNAUFZEICHNUNG
 // ==================================================
-// Problem im bisherigen Stand:
-// rennhistorieBearbeiten() lief in derselben loop() wie HTTPS/Firebase.
-// Mehrere blockierende HTTP-Aufrufe konnten deshalb aus eingestellten 5 s
-// reale Luecken von deutlich ueber 5 s machen.
+// Punkt 1:
+// - eigener FreeRTOS-Task fuer den exakten Capture-Zeitpunkt
+// - keine HTTP-/Flash-Zugriffe im Capture-Task
 //
-// Loesung:
-// - Ein eigener FreeRTOS-Task erzeugt den Renn-Snapshot zeitlich unabhaengig
-//   von WLAN/Firebase.
-// - Der Task macht KEINE HTTP- und KEINE Flash-Zugriffe. Er legt nur einen
-//   kompakten Snapshot in eine RAM-Queue.
-// - Die normale loop() verarbeitet pro Durchlauf genau einen Snapshot. Erst
-//   dort wird die Sample-Sequenz vergeben und wie bisher direkt gesendet oder
-//   bei Fehler/Offline dauerhaft in LittleFS gepuffert.
-// - Damit bleiben die vorhandene Offline-Queue, deterministische Sample-IDs
-//   und die Diagnose-Patches kompatibel.
-//
-// Hinweis fuer Punkt 10:
-// Ein Snapshot, der waehrend eines blockierenden HTTP-Aufrufs nur in der
-// RAM-Queue wartet, ist bis zur Verarbeitung noch nicht stromausfallsicher.
-// Das wird beim geplanten realen Offline-/Power-Cycle-Test gezielt geprueft.
+// Punkt 2:
+// - Basis-Rennrecord, Oeldruckdiagnose und RPM/GPIO11-Diagnose werden
+//   innerhalb EINES Capture-Vorgangs eingefroren
+// - alle drei Datensaetze erhalten spaeter dieselbe bootId/sequence
+// - GPIO11 wird genau einmal gelesen und fuer Basis + beide Diagnosen benutzt
+// - Basis-Oeldruck wird aus derselben eingefrorenen AIN1-Spannung berechnet,
+//   aus der auch die Oeldruckdiagnose entsteht
+// - Basis-RPM wird aus demselben eingefrorenen RPM-Snapshot abgeleitet wie die
+//   RPM-Diagnose
 // ==================================================
 
 constexpr uint8_t MF35X_RACE_TIMING_QUEUE_LEN = 32;
@@ -36,7 +29,7 @@ constexpr uint32_t MF35X_RACE_TIMING_TASK_STACK = 4096;
 constexpr UBaseType_t MF35X_RACE_TIMING_TASK_PRIORITY = 2;
 constexpr BaseType_t MF35X_RACE_TIMING_TASK_CORE = 1;
 constexpr TickType_t MF35X_RACE_TIMING_POLL_TICKS = pdMS_TO_TICKS(5);
-constexpr size_t MF35X_RACE_ID_BUFFER_LEN = 49; // max. 48 Zeichen + \0
+constexpr size_t MF35X_RACE_ID_BUFFER_LEN = 49;
 
 struct Mf35xRaceTimingConfig {
   bool enabled;
@@ -47,6 +40,10 @@ struct Mf35xRaceTimingConfig {
 
 struct Mf35xTimedRaceCapture {
   OfflineRaceRecord rec;
+  Mf35xOilDiagRecord oilDiag;
+  Mf35xRpmDiagRecord rpmDiag;
+  float oilPressureBarForStats;
+  uint32_t captureWindowUs;
   char raceId[MF35X_RACE_ID_BUFFER_LEN];
 };
 
@@ -61,6 +58,8 @@ volatile uint32_t mf35xRaceTimingQueueDropped = 0;
 volatile uint32_t mf35xRaceTimingScheduleMissed = 0;
 volatile uint32_t mf35xRaceTimingLastDeltaMs = 0;
 volatile uint32_t mf35xRaceTimingMaxJitterMs = 0;
+volatile uint32_t mf35xRaceAtomicLastWindowUs = 0;
+volatile uint32_t mf35xRaceAtomicMaxWindowUs = 0;
 
 uint32_t mf35xRaceTimingIntervall() {
   uint32_t intervall = (uint32_t)recordingConfig.historyUpdateMs;
@@ -111,12 +110,164 @@ Mf35xRaceTimingConfig mf35xRaceTimingConfigLesen() {
   return copy;
 }
 
-OfflineRaceRecord mf35xRaceCaptureRecordBauen() {
-  // Inhalt bewusst analog zu offlineRecordBauen(), aber OHNE Vergabe der
-  // Sample-Sequenz. Diese wird erst beim Verarbeiten in der normalen loop()
-  // vergeben. Dadurch sehen die vorhandenen Diagnose-Patches weiterhin pro
-  // verarbeitetem Basissample exakt einen Sequenzsprung.
-  OfflineRaceRecord rec = {};
+float mf35xRaceOilPressureFinalFromVoltage(float v) {
+  if (!adsOk || !isfinite(v)) return NAN;
+  if (v < 0.02f) return NAN;
+  if (v > 3.10f || v >= DRUCK_VCC - 0.02f) return NAN;
+
+  const float ohm = DRUCK_R_FIXED * v / (DRUCK_VCC - v);
+  float bar = widerstandZuBar(ohm);
+  if (isfinite(bar) && bar < 0.55f) bar = 0.0f;
+  return bar;
+}
+
+float mf35xRaceOilTempFromVoltage(float v) {
+  if (!adsOk || !isfinite(v) || v <= 0.05f || v >= 3.25f) return NAN;
+
+  const float ohm = OEL_R_FIXED * v / (OEL_VCC - v);
+  float temp =
+    OEL_CAL_T1 +
+    ((OEL_CAL_R1 - ohm) * (OEL_CAL_T2 - OEL_CAL_T1) /
+     (OEL_CAL_R1 - OEL_CAL_R2));
+  temp += OEL_TEMP_OFFSET;
+  return temp;
+}
+
+float mf35xRaceBatteryFromAdcVoltage(float v) {
+  if (!adsOk || !isfinite(v) || v < 0.02f || v > 3.25f) return NAN;
+  return v * BAT_TEILERFAKTOR * BAT_KORREKTUR;
+}
+
+uint8_t mf35xRaceOilDiagStateFromVoltage(bool adsOkAtCapture, float v) {
+  if (!adsOkAtCapture) return MF35X_OP_ADS_ERROR;
+  if (!isfinite(v)) return MF35X_OP_INVALID;
+  if (v < 0.02f) return MF35X_OP_SHORT;
+  if (v > 2.50f) return MF35X_OP_OPEN;
+
+  const float ohm = mf35xDiagOhmFromVoltage(v);
+  if (!isfinite(ohm)) return MF35X_OP_INVALID;
+  if (ohm < 5.0f || ohm > 250.0f) return MF35X_OP_OUT_OF_RANGE;
+  return MF35X_OP_OK;
+}
+
+Mf35xOilDiagRecord mf35xRaceOilDiagSnapshotBauen(
+  float pressureVoltage,
+  bool adsOkAtCapture,
+  bool switchState
+) {
+  Mf35xOilDiagRecord rec = {};
+  rec.magic = MF35X_DIAG_MAGIC;
+  rec.version = MF35X_DIAG_VERSION;
+  rec.size = sizeof(rec);
+  rec.bootId = offlineBootId;
+  rec.sequence = 0;
+
+  if (isfinite(pressureVoltage)) {
+    long raw = lroundf(pressureVoltage / MF35X_DIAG_ADS_LSB_V);
+    if (raw < 0) raw = 0;
+    if (raw > INT16_MAX) raw = INT16_MAX;
+    rec.rawAdc = (int16_t)raw;
+  } else {
+    rec.rawAdc = 0;
+  }
+
+  rec.diagState =
+    mf35xRaceOilDiagStateFromVoltage(adsOkAtCapture, pressureVoltage);
+  rec.gpio11 = switchState ? 1 : 0;
+  rec.state = MF35X_DIAG_PENDING;
+  rec.crc32 = mf35xDiagRecordCrc(rec);
+  return rec;
+}
+
+Mf35xRpmDiagRecord mf35xRaceRpmDiagSnapshotBauen(
+  bool& rpmValidOut,
+  uint16_t& rpmValueOut,
+  bool& switchStateOut
+) {
+  Mf35xRpmDiagRecord rec = {};
+  rec.magic = MF35X_RPM_DIAG_MAGIC;
+  rec.version = MF35X_RPM_DIAG_VERSION;
+  rec.size = sizeof(rec);
+  rec.bootId = offlineBootId;
+  rec.sequence = 0;
+  rec.state = MF35X_RPM_DIAG_PENDING;
+
+  float rawRpm = 0.0f;
+  float filteredRpm = 0.0f;
+  float displayRpm = 0.0f;
+  uint32_t rawEdges = 0;
+  uint32_t acceptedEdges = 0;
+  uint32_t rejectedEdges = 0;
+  uint32_t doubleEdges = 0;
+  uint32_t reacquires = 0;
+  uint32_t referenceUs = 0;
+  uint8_t periodCount = 0;
+
+  portENTER_CRITICAL(&mf35xRpmMux);
+  rawRpm = mf35xRpmRohUngefiltert;
+  filteredRpm = mf35xRpmSchnell;
+  displayRpm = rpm;
+  rawEdges = mf35xRpmRohImpulseGesamt;
+  acceptedEdges = mf35xRpmAkzeptierteImpulseGesamt;
+  rejectedEdges = mf35xRpmVerworfeneImpulse;
+  doubleEdges = mf35xRpmDoppelImpulse;
+  reacquires = mf35xRpmNeuerfassungen;
+  referenceUs = mf35xRpmReferenzPeriodeUs;
+  periodCount = mf35xRpmPeriodenCount;
+  portEXIT_CRITICAL(&mf35xRpmMux);
+
+  // Diese beiden Zustandswerte werden genau einmal gelesen und danach sowohl
+  // fuer Basisrecord als auch Diagnose verwendet.
+  const bool signalOkAtCapture = rpmSignalOk;
+  const bool switchAtCapture = schaltausgangAktiv;
+
+  rec.rawRpmDeci = mf35xRpmDiagDeci(rawRpm);
+  rec.filteredRpmDeci = mf35xRpmDiagDeci(filteredRpm);
+  rec.displayRpmDeci = mf35xRpmDiagDeci(displayRpm);
+  rec.rawEdgesTotal = rawEdges;
+  rec.acceptedEdgesTotal = acceptedEdges;
+  rec.rejectedEdgesTotal = rejectedEdges;
+  rec.doubleEdgesTotal = doubleEdges;
+  rec.reacquireTotal = reacquires;
+  rec.referencePeriodUs = referenceUs;
+  rec.rejectedSinceLastSample =
+    mf35xRpmDiagDelta16(rejectedEdges, mf35xRpmDiagLastRejected);
+  rec.doubleSinceLastSample =
+    mf35xRpmDiagDelta16(doubleEdges, mf35xRpmDiagLastDouble);
+  rec.periodCount = periodCount;
+
+  mf35xRpmDiagLastRejected = rejectedEdges;
+  mf35xRpmDiagLastDouble = doubleEdges;
+
+  if (signalOkAtCapture) rec.flags |= MF35X_RPM_DIAG_FLAG_SIGNAL_OK;
+  if (referenceUs != 0 && periodCount >= MF35X_RPM_MIN_PERIODEN) {
+    rec.flags |= MF35X_RPM_DIAG_FLAG_FILTER_LOCKED;
+  }
+  if (switchAtCapture) rec.flags |= MF35X_RPM_DIAG_FLAG_GPIO11;
+  if (isfinite(rawRpm)) rec.flags |= MF35X_RPM_DIAG_FLAG_RAW_VALID;
+  if (signalOkAtCapture && isfinite(filteredRpm)) {
+    rec.flags |= MF35X_RPM_DIAG_FLAG_FILTERED_VALID;
+  }
+  if (signalOkAtCapture && isfinite(displayRpm)) {
+    rec.flags |= MF35X_RPM_DIAG_FLAG_DISPLAY_VALID;
+  }
+
+  rpmValidOut =
+    (rec.flags & MF35X_RPM_DIAG_FLAG_DISPLAY_VALID) != 0;
+  rpmValueOut = rpmValidOut
+    ? (uint16_t)(((uint32_t)rec.displayRpmDeci + 5UL) / 10UL)
+    : 0U;
+  switchStateOut = switchAtCapture;
+
+  rec.crc32 = mf35xRpmDiagRecordCrc(rec);
+  return rec;
+}
+
+Mf35xTimedRaceCapture mf35xRaceAtomicCaptureBauen(const char* raceId) {
+  Mf35xTimedRaceCapture item = {};
+  const uint32_t captureStartUs = micros();
+
+  OfflineRaceRecord& rec = item.rec;
   rec.magic = OFFLINE_RECORD_MAGIC;
   rec.version = OFFLINE_RECORD_VERSION;
   rec.size = sizeof(OfflineRaceRecord);
@@ -124,6 +275,35 @@ OfflineRaceRecord mf35xRaceCaptureRecordBauen() {
   rec.sequence = 0;
   rec.capturedMillis = millis();
   rec.state = OFFLINE_STATE_PENDING;
+
+  bool rpmValid = false;
+  uint16_t rpmValue = 0;
+  bool switchState = false;
+  item.rpmDiag =
+    mf35xRaceRpmDiagSnapshotBauen(rpmValid, rpmValue, switchState);
+
+  // AIN-Werte genau einmal einfrieren. Die Basiswerte werden aus denselben
+  // Spannungen neu berechnet; damit koennen Basis und Diagnose nicht mehr aus
+  // zwei verschiedenen Sensorzyklen stammen.
+  const bool adsOkAtCapture = adsOk;
+  const float pressureVoltage = oilPressureVoltage;
+  const float oilTempVoltage = oilVoltage;
+  const float batteryAdcAtCapture = batteryAdcVoltage;
+  const double cylinderAtCapture = cylinderTemp;
+
+  const float pressureBar =
+    mf35xRaceOilPressureFinalFromVoltage(pressureVoltage);
+  const float oilTempAtCapture =
+    mf35xRaceOilTempFromVoltage(oilTempVoltage);
+  const float batteryAtCapture =
+    mf35xRaceBatteryFromAdcVoltage(batteryAdcAtCapture);
+
+  item.oilDiag = mf35xRaceOilDiagSnapshotBauen(
+    pressureVoltage,
+    adsOkAtCapture,
+    switchState
+  );
+  item.oilPressureBarForStats = pressureBar;
 
   const GpsSnapshot gpsDaten = gpsSnapshotLesen();
   const bool gpsGueltig = gpsFixAktuell(gpsDaten);
@@ -136,17 +316,20 @@ OfflineRaceRecord mf35xRaceCaptureRecordBauen() {
 
   if (gpsGueltig && gpsDaten.speedValid) {
     rec.flags |= OFFLINE_FLAG_SPEED_VALID;
-    rec.speedDeci = offlineSkaliertSigned((float)gpsDaten.speedKmh, 10.0f);
+    rec.speedDeci =
+      offlineSkaliertSigned((float)gpsDaten.speedKmh, 10.0f);
   }
 
   if (gpsDaten.hdopValid) {
     rec.flags |= OFFLINE_FLAG_HDOP_VALID;
-    rec.hdopCenti = offlineSkaliertUnsigned((float)gpsDaten.hdop, 100.0f);
+    rec.hdopCenti =
+      offlineSkaliertUnsigned((float)gpsDaten.hdop, 100.0f);
   }
 
   if (gpsDaten.satellitesValid) {
     rec.flags |= OFFLINE_FLAG_SATELLITES_VALID;
-    rec.satellites = (uint8_t)(gpsDaten.satellites > 255U ? 255U : gpsDaten.satellites);
+    rec.satellites =
+      (uint8_t)(gpsDaten.satellites > 255U ? 255U : gpsDaten.satellites);
   }
 
   if (gpsDaten.utcValid && gpsDaten.utcEpochMs > 1700000000000ULL) {
@@ -158,41 +341,56 @@ OfflineRaceRecord mf35xRaceCaptureRecordBauen() {
     }
   }
 
-  if (rpmSignalOk && isfinite(rpm)) {
+  if (rpmValid) {
     rec.flags |= OFFLINE_FLAG_RPM_VALID;
-    rec.rpmValue = offlineSkaliertUnsigned(rpm, 1.0f);
+    rec.rpmValue = rpmValue;
   }
 
-  if (isfinite(oilPressureBar)) {
+  if (isfinite(pressureBar)) {
     rec.flags |= OFFLINE_FLAG_OIL_PRESSURE_VALID;
-    rec.oilPressureCenti = offlineSkaliertSigned(oilPressureBar, 100.0f);
+    rec.oilPressureCenti =
+      offlineSkaliertSigned(pressureBar, 100.0f);
   }
 
-  if (isfinite(oilTemp)) {
+  if (isfinite(oilTempAtCapture)) {
     rec.flags |= OFFLINE_FLAG_OIL_TEMP_VALID;
-    rec.oilTempDeci = offlineSkaliertSigned(oilTemp, 10.0f);
+    rec.oilTempDeci =
+      offlineSkaliertSigned(oilTempAtCapture, 10.0f);
   }
 
-  if (isfinite(batteryVoltage)) {
+  if (isfinite(batteryAtCapture)) {
     rec.flags |= OFFLINE_FLAG_BATTERY_VALID;
-    rec.batteryCenti = offlineSkaliertUnsigned(batteryVoltage, 100.0f);
+    rec.batteryCenti =
+      offlineSkaliertUnsigned(batteryAtCapture, 100.0f);
   }
 
-  if (isfinite(cylinderTemp)) {
+  if (isfinite(cylinderAtCapture)) {
     rec.flags |= OFFLINE_FLAG_CYLINDER_VALID;
-    rec.cylinderTempDeci = offlineSkaliertSigned((float)cylinderTemp, 10.0f);
+    rec.cylinderTempDeci =
+      offlineSkaliertSigned((float)cylinderAtCapture, 10.0f);
   }
 
-  if (schaltausgangAktiv) {
+  if (switchState) {
     rec.flags |= OFFLINE_FLAG_SWITCH_OUTPUT;
   }
 
   rec.wifiRssi =
     WiFi.status() == WL_CONNECTED ? (int16_t)WiFi.RSSI() : (int16_t)-127;
 
-  // CRC wird nach Vergabe der finalen Sequenz in der loop() berechnet.
+  strncpy(item.raceId, raceId ? raceId : "", sizeof(item.raceId) - 1);
+
+  // CRCs werden nach Vergabe der gemeinsamen finalen Sequenz neu berechnet.
   rec.crc32 = 0;
-  return rec;
+  item.oilDiag.crc32 = 0;
+  item.rpmDiag.crc32 = 0;
+
+  item.captureWindowUs = (uint32_t)(micros() - captureStartUs);
+  mf35xRaceAtomicLastWindowUs = item.captureWindowUs;
+  if (item.captureWindowUs > mf35xRaceAtomicMaxWindowUs) {
+    mf35xRaceAtomicMaxWindowUs = item.captureWindowUs;
+  }
+
+  return item;
 }
 
 void mf35xRaceTimingTask(void*) {
@@ -212,16 +410,17 @@ void mf35xRaceTimingTask(void*) {
 
     if (cfg.enabled && cfg.intervalMs >= 1000UL && nextCaptureMs != 0 &&
         (int32_t)(now - nextCaptureMs) >= 0) {
-      Mf35xTimedRaceCapture item = {};
-      item.rec = mf35xRaceCaptureRecordBauen();
-      strncpy(item.raceId, cfg.raceId, sizeof(item.raceId) - 1);
+      Mf35xTimedRaceCapture item =
+        mf35xRaceAtomicCaptureBauen(cfg.raceId);
 
       if (lastCaptureMs != 0) {
         const uint32_t delta =
           (uint32_t)(item.rec.capturedMillis - lastCaptureMs);
         mf35xRaceTimingLastDeltaMs = delta;
         const uint32_t jitter =
-          delta > cfg.intervalMs ? delta - cfg.intervalMs : cfg.intervalMs - delta;
+          delta > cfg.intervalMs
+            ? delta - cfg.intervalMs
+            : cfg.intervalMs - delta;
         if (jitter > mf35xRaceTimingMaxJitterMs) {
           mf35xRaceTimingMaxJitterMs = jitter;
         }
@@ -237,9 +436,6 @@ void mf35xRaceTimingTask(void*) {
 
       nextCaptureMs += cfg.intervalMs;
 
-      // Falls der Scheduler selbst jemals um mindestens ein ganzes Intervall
-      // verspaetet wurde, keine kuenstlichen Mehrfach-Samples mit identischen
-      // Istwerten erzeugen. Stattdessen Zaehler erhoehen und sauber neu takten.
       if ((int32_t)(now - nextCaptureMs) >= 0) {
         const uint32_t missed =
           ((uint32_t)(now - nextCaptureMs) / cfg.intervalMs) + 1UL;
@@ -284,46 +480,44 @@ void mf35xRaceTimingSetup() {
   }
 
   Serial.println(
-    "RACE-TIMING: eigener Capture-Task aktiv - Rennintervall von HTTPS/Firebase entkoppelt"
+    "RACE-TIMING: exakter + atomarer Capture-Task aktiv"
   );
 }
 
+// Kompatibilitaetsfunktion. Der normale next-usb-Pfad verwendet
+// mf35xRacePersistOne() aus race_network_isolation.hpp.
 void mf35xRaceTimingBearbeiten() {
-  // Die Konfiguration wird nur in der normalen loop() aus den String-basierten
-  // Recording-Werten in einen task-sicheren Fixpuffer gespiegelt.
   mf35xRaceTimingConfigSync();
 
-  // Sicherer Fallback: Sollte der Task/Queue-Start wider Erwarten fehlschlagen,
-  // bleibt die bisherige Rennaufzeichnung funktionsfaehig.
   if (!mf35xRaceTimingQueue || !mf35xRaceTimingTaskHandle) {
     rennhistorieBearbeiten();
     return;
   }
 
   Mf35xTimedRaceCapture item = {};
-  if (xQueueReceive(mf35xRaceTimingQueue, &item, 0) != pdTRUE) {
-    return;
-  }
+  if (xQueueReceive(mf35xRaceTimingQueue, &item, 0) != pdTRUE) return;
 
-  OfflineRaceRecord rec = item.rec;
-  rec.sequence = ++offlineSampleSequence;
-  rec.crc32 = offlineRecordCrc(rec);
+  const uint32_t sequence = ++offlineSampleSequence;
+  item.rec.sequence = sequence;
+  item.oilDiag.sequence = sequence;
+  item.rpmDiag.sequence = sequence;
+
+  item.rec.crc32 = offlineRecordCrc(item.rec);
+  item.oilDiag.crc32 = mf35xDiagRecordCrc(item.oilDiag);
+  item.rpmDiag.crc32 = mf35xRpmDiagRecordCrc(item.rpmDiag);
+
   const String raceId(item.raceId);
-
-  // Ab hier exakt das bewaehrte V5.9.19-Verhalten:
-  // online ohne Rueckstau direkt PUT, andernfalls dauerhaft in LittleFS.
-  if (WiFi.status() == WL_CONNECTED && offlinePendingCount == 0) {
-    if (offlineRecordSenden(raceId, rec, false)) {
-      historyOk++;
-      mf35xRaceTimingProcessed++;
-      return;
+  if (offlineRecordDauerhaftPuffern(raceId, item.rec)) {
+    if (isfinite(item.oilPressureBarForStats)) {
+      if (mf35xDiagRaceId != raceId) mf35xDiagStatsReset(raceId);
+      mf35xDiagStatsAdd(item.oilPressureBarForStats);
     }
+    mf35xDiagQueueAppend(raceId, item.oilDiag);
+    mf35xRpmDiagQueueAppend(raceId, item.rpmDiag);
+  } else {
     historyFehler++;
   }
 
-  if (!offlineRecordDauerhaftPuffern(raceId, rec)) {
-    historyFehler++;
-  }
   mf35xRaceTimingProcessed++;
 }
 
