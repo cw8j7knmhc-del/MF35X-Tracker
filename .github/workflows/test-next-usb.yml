@@ -1,0 +1,71 @@
+name: Test MF35X next USB firmware
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [next-usb]
+    paths:
+      - 'esp32/**'
+      - 'tests/**'
+      - '.github/workflows/test-next-usb.yml'
+      - '.github/workflows/build-firmware.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mf35x-next-usb-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-compile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Release gate regression tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile ESP32-S3 application
+        run: |
+          rm -rf build
+          mkdir -p build
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
+            --warnings all \
+            --output-dir build \
+            esp32/MF35X_Livetracker
+
+      - name: Verify application binary exists
+        run: |
+          set -euo pipefail
+          APP_BIN="$(find build -maxdepth 1 -type f -name '*.ino.bin' | head -n 1)"
+          if [ -z "$APP_BIN" ] || [ ! -s "$APP_BIN" ]; then
+            echo "FEHLER: Firmware-Binary wurde nicht erzeugt."
+            exit 1
+          fi
+          echo "Firmware compile OK: $APP_BIN"
+
+      - name: Safety check - this workflow never publishes
+        run: |
+          echo "next-usb validation only: no signing, no manifest update, no push to main."
