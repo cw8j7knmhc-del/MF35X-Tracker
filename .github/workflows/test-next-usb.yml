@@ -7,6 +7,8 @@ on:
     paths:
       - 'esp32/**'
       - 'tests/**'
+      - 'admin-v5922.js'
+      - 'firebase-config.js'
       - '.github/workflows/test-next-usb.yml'
       - '.github/workflows/build-firmware.yml'
 
@@ -27,6 +29,11 @@ jobs:
 
       - name: Release gate regression tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Validate admin JavaScript syntax
+        run: |
+          node --check admin-v5922.js
+          node --check firebase-config.js
 
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
