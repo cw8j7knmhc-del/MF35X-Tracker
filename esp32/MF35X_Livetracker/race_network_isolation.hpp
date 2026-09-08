@@ -4,14 +4,16 @@
 #include <freertos/task.h>
 
 // ==================================================
-// NAECHSTER USB-STAND - PUNKT 1B + PUNKT 2
-// RENNNETZWERK ENTKOPPELT + ATOMARE COMPANION-DATEN
+// NAECHSTER USB-STAND - PUNKT 1B + PUNKT 2 + PUNKT 5
+// RENNNETZWERK ENTKOPPELT + ATOMARE DATEN + FAST-TRACK
 // ==================================================
 // - normale Arduino-loop() macht fuer Rennsamples keinen HTTP-Aufruf
-// - Capture erfolgt atomar in race_timing_fix.hpp
-// - Basisrecord + Oeldruckdiagnose + RPM/GPIO11-Diagnose werden hier mit
-//   exakt derselben sequence dauerhaft lokal gespeichert
-// - erst ein separater Background-Task sendet alles zu Firebase
+// - Capture der Voll-Telemetrie erfolgt atomar in race_timing_fix.hpp
+// - Basisrecord + Oeldruckdiagnose + RPM/GPIO11-Diagnose erhalten exakt
+//   dieselbe sequence
+// - fast_track_logger.hpp zeichnet parallel den Strecken-/Fahrzustand mit
+//   10 Hz auf und fasst die Punkte zu ~1-s-Paketen zusammen
+// - erst dieser Background-Task sendet Renn- und Fast-Track-Daten zu Firebase
 // ==================================================
 
 constexpr uint32_t MF35X_RACE_UPLOAD_TASK_STACK = 6144;
@@ -91,8 +93,7 @@ void mf35xRaceUploadTask(void*) {
     mf35xRaceBackgroundLoops++;
 
     if (WiFi.status() == WL_CONNECTED) {
-      // Basis zuerst. Companion-Diagnosen werden erst danach an genau denselben
-      // Sample-Key gepatcht.
+      // Wichtigste Daten zuerst: 5-s-Basissample und dessen Diagnosen.
       offlineDrainBearbeiten();
       mf35xDiagDrainOne();
       mf35xRpmDiagDrainOne();
@@ -105,6 +106,11 @@ void mf35xRaceUploadTask(void*) {
         mf35xDiagStatsUpload();
       }
     }
+
+    // Punkt 5: Fast-Track immer bearbeiten. Online wird hochgeladen; offline
+    // wird der RAM-Batch mit niedriger Prioritaet in LittleFS gepuffert.
+    // Der Fast-Track darf den Basis-Rennpuffer nie verdraengen.
+    mf35xFastTrackDrainOne();
 
     vTaskDelay(MF35X_RACE_UPLOAD_TASK_DELAY);
   }
@@ -130,7 +136,7 @@ void mf35xRaceNetworkIsolationSetup() {
   }
 
   Serial.println(
-    "RACE-UPLOAD: Netzwerk entkoppelt; atomare Rennsamples aktiv"
+    "RACE-UPLOAD: Netzwerk entkoppelt; atomare Rennsamples + 10-Hz-Fast-Track aktiv"
   );
 }
 
