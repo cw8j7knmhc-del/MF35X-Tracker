@@ -46,3 +46,21 @@ if (
     });
   }, 0);
 }
+
+/*
+ * V5.9.22: festes Renn-CSV-Schema + Verbindungsdiagnose.
+ * Nur Admin; Besucheransicht bleibt unveraendert.
+ */
+if (
+  typeof window !== "undefined" &&
+  /\/admin\.html$/.test(window.location.pathname) &&
+  !window.__mf35xV5922AdminStarted
+) {
+  window.__mf35xV5922AdminStarted = true;
+
+  setTimeout(() => {
+    import(`./admin-v5922.js?v=20260908-1-${Date.now()}`).catch(error => {
+      console.error("V5.9.22 Admin-Erweiterung konnte nicht geladen werden:", error);
+    });
+  }, 0);
+}
