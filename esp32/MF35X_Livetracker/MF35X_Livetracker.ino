@@ -2,6 +2,7 @@
   MF35X Livetracker - naechster USB-Arbeitsstand auf Basis V5.9.19
   - V5.9.19 bleibt der derzeitige Referenzstand am Fahrzeug
   - Punkt 1: Renn-Sampling zeitlich von HTTPS/Firebase entkoppelt
+  - Punkt 1B: Renn-Upload/Diagnose komplett aus der Live-loop ausgelagert
   - robuste Drehzahlauswertung am W-Anschluss mit Median + Plausibilitaetsfilter
   - zusaetzliche 0,5x-Doppelflankensperre gegen nahezu exakt doppelte RPM
   - schnelle GPIO11-Steuerung verwendet ausschliesslich plausibilisierte RPM
@@ -54,19 +55,21 @@ void jsonLongFeld(String& json, bool& erstesFeld, const char* key, long wert) {
 #include "v5917_patch.hpp"
 #include "v5918_rpm_diagnostics.hpp"
 #include "race_timing_fix.hpp"
+#include "race_network_isolation.hpp"
 
 void setup() {
   mf35xCoreSetup();
   mf35xV5917PatchSetup();
   mf35xV5918RpmDiagSetup();
   mf35xRaceTimingSetup();
+  mf35xRaceNetworkIsolationSetup();
 }
 
-// Punkt 1:
+// Punkt 1 / 1B:
 // Der bisherige mf35xCoreLoop() wird fuer den naechsten USB-Arbeitsstand
-// bewusst nicht direkt aufgerufen. Sein Ablauf bleibt hier gleich, nur die
-// Rennaufzeichnung wird GANZ VOR die blockierenden Firebase/HTTPS-Arbeiten
-// gezogen und durch den eigenen Race-Timing-Task bedient.
+// bewusst nicht direkt aufgerufen. Sein Ablauf bleibt funktional gleich,
+// aber alle rennbezogenen Netzwerkzugriffe sind aus der normalen loop()
+// entfernt.
 void mf35xNextUsbCoreLoop() {
   otaFirmwareValidierenWennBereit();
   gpsEinlesen();
@@ -77,10 +80,9 @@ void mf35xNextUsbCoreLoop() {
     schaltausgangAktualisieren();
   }
 
-  // Zuerst einen eventuell exakt getakteten Renn-Snapshot verarbeiten.
-  // Ein HTTPS-Timeout weiter unten kann dadurch keinen Capture-Zeitpunkt mehr
-  // verschieben; waehrend einer Blockade sammelt der Capture-Task weiter.
-  mf35xRaceTimingBearbeiten();
+  // Rennsample aus dem exakten Capture-Task nur schnell in LittleFS sichern.
+  // KEIN Firebase-/HTTPS-Zugriff in diesem Pfad.
+  mf35xRacePersistOne();
 
   unsigned long jetzt = millis();
 
@@ -101,8 +103,9 @@ void mf35xNextUsbCoreLoop() {
   // NVS-Sicherung, Maxwert-Sync und Alarm-Nachsenden.
   deviceDerivedDataBearbeiten();
 
-  // Maximal einen dauerhaft gepufferten Datensatz pro Drain-Zyklus nachsenden.
-  offlineDrainBearbeiten();
+  // WICHTIG: offlineDrainBearbeiten() wird hier NICHT mehr aufgerufen.
+  // Renn-Basisdaten und Companion-Diagnosen werden ausschliesslich vom
+  // mf35x_race_upload Background-Task nach Firebase gesendet.
 
   if (WiFi.status() == WL_CONNECTED &&
       zeitFaellig(jetzt, letzterDeviceStatus, DEVICE_STATUS_INTERVAL_MS)) {
@@ -117,13 +120,11 @@ void mf35xNextUsbCoreLoop() {
 }
 
 void loop() {
-  // offlineSampleSequence wird beim neuen Timing erst dann erhoeht, wenn der
-  // Basissample in der normalen loop() tatsaechlich verarbeitet wird. Dadurch
-  // bleiben die V5.9.17/V5.9.18-Diagnosebegleiter 1:1 zum Basissample erhalten.
-  const uint32_t raceSequenceBefore = offlineSampleSequence;
-
   mf35xNextUsbCoreLoop();
 
-  mf35xV5917PatchLoop(raceSequenceBefore);
-  mf35xV5918RpmDiagLoop(raceSequenceBefore);
+  // Nur lokale/Plausibilitaets-Hausarbeit. Die bisherigen V5.9.17/18-
+  // Patch-Loops werden hier absichtlich NICHT mehr aufgerufen, weil diese
+  // rennbezogene Firebase-PATCH/GET-Aufrufe enthalten. Diagnose-Capture und
+  // Nachsenden laufen jetzt ueber race_network_isolation.hpp.
+  mf35xRaceNoNetworkHousekeeping();
 }
