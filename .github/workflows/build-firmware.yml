@@ -1,5 +1,6 @@
 name: Build signed MF35X firmware
 # Publish step rebases onto the latest main before pushing signed OTA artifacts.
+# WICHTIG: Kein Signieren/Publizieren, bevor die Release-Gate-Tests bestanden sind.
 
 on:
   workflow_dispatch:
@@ -7,6 +8,7 @@ on:
     branches: [main]
     paths:
       - 'esp32/**'
+      - 'tests/**'
       - '.github/workflows/build-firmware.yml'
 
 permissions:
@@ -23,6 +25,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Release gate regression tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
 
       - name: Install Arduino CLI
         uses: arduino/setup-arduino-cli@v2
@@ -48,8 +53,19 @@ jobs:
           arduino-cli compile \
             --fqbn esp32:esp32:esp32s3 \
             --board-options PSRAM=opi \
+            --warnings all \
             --output-dir build \
             esp32/MF35X_Livetracker
+
+      - name: Verify application binary exists
+        run: |
+          set -euo pipefail
+          APP_BIN="$(find build -maxdepth 1 -type f -name '*.ino.bin' | head -n 1)"
+          if [ -z "$APP_BIN" ] || [ ! -s "$APP_BIN" ]; then
+            echo "Application .ino.bin nicht gefunden oder leer."
+            exit 1
+          fi
+          echo "Firmware compile OK: $APP_BIN"
 
       - name: Check signing key secret
         env:
@@ -120,6 +136,27 @@ jobs:
           PY
 
           rm -f /tmp/mf35x_ota_private_key.pem
+
+      - name: Validate generated manifest before publish
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, re
+
+          header = Path('esp32/MF35X_Livetracker/firmware_version.h').read_text()
+          manifest = json.loads(Path('firmware/manifest.json').read_text())
+          v = re.search(r'MF35X_FIRMWARE_VERSION\s+"([^"]+)"', header)
+          c = re.search(r'MF35X_FIRMWARE_VERSION_CODE\s+(\d+)', header)
+          if not v or not c:
+              raise SystemExit('Version im Header nicht lesbar')
+          if manifest.get('version') != v.group(1):
+              raise SystemExit('Manifest-Version stimmt nicht mit Header ueberein')
+          if int(manifest.get('versionCode', -1)) != int(c.group(1)):
+              raise SystemExit('Manifest-VersionCode stimmt nicht mit Header ueberein')
+          if not manifest.get('signed'):
+              raise SystemExit('Manifest ist nicht als signiert markiert')
+          print('Manifest consistency OK')
+          PY
 
       - name: Publish signed firmware to repository
         run: |
