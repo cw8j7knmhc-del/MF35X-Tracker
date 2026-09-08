@@ -284,6 +284,160 @@ try {
 }
 
 // --------------------------------------------------
+// Externer Ausgang: Hysterese einfach als Abstand zu HIGH eingeben
+// --------------------------------------------------
+function setLabelText(label, text) {
+  if (!label) return;
+  const textNode = [...label.childNodes].find(
+    node => node.nodeType === Node.TEXT_NODE && node.textContent.trim().length > 0
+  );
+  if (textNode) textNode.textContent = `\n        ${text}\n        `;
+}
+
+const outputSpeedInput = document.getElementById("setOutputSpeedEnableKmh");
+const outputRpmOnInput = document.getElementById("setOutputRpmOn");
+const originalRpmOffInput = document.getElementById("setOutputRpmOff");
+const outputSpeedLabel = outputSpeedInput?.closest("label");
+const outputRpmOnLabel = outputRpmOnInput?.closest("label");
+const outputRpmOffLabel = originalRpmOffInput?.closest("label");
+
+setLabelText(outputSpeedLabel, "Freigabe ab (km/h)");
+setLabelText(outputRpmOnLabel, "HIGH ab (U/min)");
+setLabelText(outputRpmOffLabel, "Hysterese (U/min)");
+
+const outputSpeedHint = outputSpeedLabel?.querySelector(".field-hint");
+const outputRpmOnHint = outputRpmOnLabel?.querySelector(".field-hint");
+const outputLowHint = outputRpmOffLabel?.querySelector(".field-hint");
+
+if (outputSpeedHint) {
+  outputSpeedHint.textContent = "Unter dieser Geschwindigkeit bleibt der Ausgang LOW.";
+}
+if (outputRpmOnHint) {
+  outputRpmOnHint.textContent = "Ab dieser Drehzahl wird der Ausgang HIGH.";
+}
+
+let outputHysteresisInput = null;
+let outputRpmOffCompatInput = null;
+
+if (originalRpmOffInput && outputRpmOffLabel) {
+  originalRpmOffInput.id = "setOutputHysteresis";
+  originalRpmOffInput.min = "1";
+  originalRpmOffInput.max = "5000";
+  originalRpmOffInput.step = "1";
+  outputHysteresisInput = originalRpmOffInput;
+
+  outputRpmOffCompatInput = document.createElement("input");
+  outputRpmOffCompatInput.type = "hidden";
+  outputRpmOffCompatInput.id = "setOutputRpmOff";
+  outputRpmOffLabel.appendChild(outputRpmOffCompatInput);
+}
+
+if (outputLowHint) {
+  outputLowHint.id = "outputLowPreview";
+}
+
+const outputSection = document.getElementById("saveOutputConfig")?.closest("section");
+const outputExplanation = outputSection?.querySelector(".settings-note.settings-note-block");
+if (outputExplanation) {
+  outputExplanation.textContent =
+    "Beispiel: HIGH 2430 U/min + Hysterese 20 U/min = LOW unter 2410 U/min. " +
+    "Unter der Geschwindigkeitsfreigabe ist der Ausgang immer LOW.";
+}
+
+function updateOutputLowPreview() {
+  if (!outputLowHint) return;
+
+  const rpmOn = Number(outputRpmOnInput?.value);
+  const hysteresis = Number(outputHysteresisInput?.value);
+
+  if (!Number.isInteger(rpmOn) || !Number.isInteger(hysteresis) ||
+      hysteresis < 1 || hysteresis > rpmOn) {
+    outputLowHint.textContent = "LOW unter --- U/min";
+    return;
+  }
+
+  const rpmOff = rpmOn - hysteresis;
+  outputLowHint.textContent = `LOW unter ${rpmOff} U/min`;
+  if (outputRpmOffCompatInput) outputRpmOffCompatInput.value = rpmOff;
+}
+
+function readOutputInteger(input, min, max, label) {
+  const value = Number(input?.value);
+  if (!Number.isInteger(value)) {
+    throw new Error(`${label}: Bitte eine ganze Zahl eingeben.`);
+  }
+  if (value < min || value > max) {
+    throw new Error(`${label}: Wert muss zwischen ${min} und ${max} liegen.`);
+  }
+  return value;
+}
+
+async function loadOutputHysteresisFromFirebase() {
+  try {
+    const snapshot = await get(ref(db, "tracker/config/external_output"));
+    const values = {
+      ...DEFAULT_OUTPUT_CONFIG,
+      ...(snapshot.val() || {})
+    };
+
+    const rpmOn = Number(values.rpm_on);
+    const rpmOff = Number(values.rpm_off);
+    const hysteresis = Number.isFinite(rpmOn) && Number.isFinite(rpmOff) && rpmOn > rpmOff
+      ? Math.round(rpmOn - rpmOff)
+      : DEFAULT_OUTPUT_CONFIG.rpm_on - DEFAULT_OUTPUT_CONFIG.rpm_off;
+
+    setField("setOutputSpeedEnableKmh", values.speed_enable_kmh);
+    setField("setOutputRpmOn", values.rpm_on);
+    setField("setOutputRpmOff", values.rpm_off);
+    setField("setOutputHysteresis", hysteresis);
+    updateOutputLowPreview();
+  } catch (error) {
+    console.warn("Hysterese konnte nicht geladen werden:", error);
+  }
+}
+
+outputRpmOnInput?.addEventListener("input", updateOutputLowPreview);
+outputHysteresisInput?.addEventListener("input", updateOutputLowPreview);
+await loadOutputHysteresisFromFirebase();
+
+const outputSaveButton = document.getElementById("saveOutputConfig");
+outputSaveButton?.addEventListener("click", async event => {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+
+  try {
+    const speedEnableKmh = readOutputInteger(outputSpeedInput, 0, 200, "Freigabe");
+    const rpmOn = readOutputInteger(outputRpmOnInput, 1, 10000, "HIGH");
+    const hysteresis = readOutputInteger(outputHysteresisInput, 1, 5000, "Hysterese");
+
+    if (hysteresis > rpmOn) {
+      throw new Error("Die Hysterese darf nicht größer als die HIGH-Drehzahl sein.");
+    }
+
+    const rpmOff = rpmOn - hysteresis;
+    if (outputRpmOffCompatInput) outputRpmOffCompatInput.value = rpmOff;
+
+    setStatus("outputConfigStatus", "Wird gespeichert…", "pending");
+
+    await set(ref(db, "tracker/config/external_output"), {
+      speed_enable_kmh: speedEnableKmh,
+      rpm_on: rpmOn,
+      rpm_off: rpmOff
+    });
+
+    updateOutputLowPreview();
+    setStatus(
+      "outputConfigStatus",
+      `Gespeichert · LOW unter ${rpmOff} U/min`,
+      "success"
+    );
+  } catch (error) {
+    setStatus("outputConfigStatus", error.message, "error");
+    alert(error.message);
+  }
+}, true);
+
+// --------------------------------------------------
 // Maximalwerte: ausschließlich den ESP32 zurücksetzen
 // --------------------------------------------------
 // Der ESP32 verwaltet seine Maximalwerte zentral in NVS und Firebase.
@@ -369,10 +523,15 @@ withResetButton(
       setField("setOutputSpeedEnableKmh", DEFAULT_OUTPUT_CONFIG.speed_enable_kmh);
       setField("setOutputRpmOn", DEFAULT_OUTPUT_CONFIG.rpm_on);
       setField("setOutputRpmOff", DEFAULT_OUTPUT_CONFIG.rpm_off);
+      setField(
+        "setOutputHysteresis",
+        DEFAULT_OUTPUT_CONFIG.rpm_on - DEFAULT_OUTPUT_CONFIG.rpm_off
+      );
+      updateOutputLowPreview();
 
       setStatus(
         "outputConfigStatus",
-        "Standardwerte 60 / 2500 / 2450 geladen und gespeichert.",
+        "Standardwerte · 60 km/h · HIGH 2500 · Hysterese 50",
         "success"
       );
     } catch (error) {
