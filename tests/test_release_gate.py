@@ -11,29 +11,35 @@ def text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def define_int(source: str, name: str) -> int:
-    m = re.search(rf"(?:#define|constexpr\s+[^;=]+)\s+{re.escape(name)}\s*(?:=\s*)?(\d+)(?:UL|U|L)?", source)
-    if not m:
-        raise AssertionError(f"Konstante {name} nicht gefunden")
-    return int(m.group(1))
-
-
 def extract_function(source: str, signature: str) -> str:
-    start = source.find(signature)
-    if start < 0:
-        raise AssertionError(f"Funktion nicht gefunden: {signature}")
-    brace = source.find("{", start)
-    if brace < 0:
-        raise AssertionError(f"Funktionsrumpf fehlt: {signature}")
-    depth = 0
-    for i in range(brace, len(source)):
-        if source[i] == "{":
-            depth += 1
-        elif source[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return source[start:i + 1]
-    raise AssertionError(f"Unvollstaendiger Funktionsrumpf: {signature}")
+    # Eine Signatur kann zuerst als Funktionsprototyp mit ';' und spaeter als
+    # echter Funktionsrumpf vorkommen. Nur die Vorkommnis mit '{' akzeptieren.
+    search_from = 0
+    while True:
+        start = source.find(signature, search_from)
+        if start < 0:
+            raise AssertionError(f"Funktion nicht gefunden: {signature}")
+
+        after = start + len(signature)
+        brace = source.find("{", after)
+        semicolon = source.find(";", after)
+
+        if brace < 0:
+            raise AssertionError(f"Funktionsrumpf fehlt: {signature}")
+
+        if semicolon >= 0 and semicolon < brace:
+            search_from = after
+            continue
+
+        depth = 0
+        for i in range(brace, len(source)):
+            if source[i] == "{":
+                depth += 1
+            elif source[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[start:i + 1]
+        raise AssertionError(f"Unvollstaendiger Funktionsrumpf: {signature}")
 
 
 HEADER = text(FW / "firmware_version.h")
@@ -67,7 +73,6 @@ class VersionGateTests(unittest.TestCase):
 class Gpio11RegressionTests(unittest.TestCase):
     @staticmethod
     def gpio_step(active, speed, rpm, rpm_valid=True, speed_enable=60.0, rpm_on=3200.0, rpm_off=3150.0):
-        # Referenzmodell des gewuenschten Verhaltens.
         if speed < speed_enable or not rpm_valid:
             return False
         if not active and rpm >= rpm_on:
@@ -105,7 +110,6 @@ class RaceTimingRegressionTests(unittest.TestCase):
 
     def test_scheduler_uses_incremental_deadline(self):
         self.assertIn("nextCaptureMs += cfg.intervalMs", TIMING)
-        self.assertIn("MF35X_RACE_TIMING_POLL_TICKS", TIMING)
         poll_ms = int(re.search(r"MF35X_RACE_TIMING_POLL_TICKS\s*=\s*pdMS_TO_TICKS\((\d+)\)", TIMING).group(1))
         self.assertLessEqual(poll_ms, 10)
 
@@ -113,7 +117,6 @@ class RaceTimingRegressionTests(unittest.TestCase):
         interval = 5000
         deadline = 0
         actual = []
-        # Modell: Netzwerkblockaden beeinflussen den separaten Capture-Task nicht.
         for _ in range(10):
             actual.append(deadline)
             deadline += interval
@@ -146,11 +149,28 @@ class AtomicSampleRegressionTests(unittest.TestCase):
         self.assertIn("item.oilDiag.bootId = offlineBootId", persist)
         self.assertIn("item.rpmDiag.bootId = offlineBootId", persist)
 
-    def test_gpio11_is_captured_once_for_atomic_sample(self):
-        capture = extract_function(TIMING, "Mf35xTimedRaceCapture mf35xRaceAtomicCaptureBauen()")
-        self.assertIn("gpio11Snapshot", capture)
-        self.assertIn("MF35X_RPM_DIAG_FLAG_GPIO11", capture)
+    def test_gpio11_is_shared_by_base_and_both_diagnostics(self):
+        capture = extract_function(
+            TIMING,
+            "Mf35xTimedRaceCapture mf35xRaceAtomicCaptureBauen(const char* raceId)",
+        )
+        self.assertIn("switchState", capture)
+        self.assertIn("mf35xRaceRpmDiagSnapshotBauen", capture)
+        self.assertIn("mf35xRaceOilDiagSnapshotBauen", capture)
         self.assertIn("OFFLINE_FLAG_SWITCH_OUTPUT", capture)
+
+        rpm_snapshot = extract_function(
+            TIMING,
+            "Mf35xRpmDiagRecord mf35xRaceRpmDiagSnapshotBauen(",
+        )
+        self.assertIn("switchAtCapture = schaltausgangAktiv", rpm_snapshot)
+        self.assertIn("MF35X_RPM_DIAG_FLAG_GPIO11", rpm_snapshot)
+
+        oil_snapshot = extract_function(
+            TIMING,
+            "Mf35xOilDiagRecord mf35xRaceOilDiagSnapshotBauen(",
+        )
+        self.assertIn("rec.gpio11 = switchState ? 1 : 0", oil_snapshot)
 
 
 class FastTrackRegressionTests(unittest.TestCase):
@@ -167,11 +187,12 @@ class FastTrackRegressionTests(unittest.TestCase):
         self.assertIn('"/fastTrack/"', FAST)
 
     def test_fast_track_cannot_consume_last_megabyte(self):
-        reserve = int(re.search(r"MF35X_FAST_TRACK_FLASH_PROTECT_BYTES\s*=\s*(\d+)UL\s*\*\s*(\d+)UL", FAST).group(1)) * 1024
+        match = re.search(r"MF35X_FAST_TRACK_FLASH_PROTECT_BYTES\s*=\s*(\d+)UL\s*\*\s*(\d+)UL", FAST)
+        self.assertIsNotNone(match)
+        reserve = int(match.group(1)) * int(match.group(2))
         self.assertGreaterEqual(reserve, 1024 * 1024)
 
     def test_50hz_input_does_not_force_50hz_storage(self):
-        # 50 GPS fixes/s, Logger speichert maximal alle 100 ms den neuesten Fix.
         incoming_hz = 50
         seconds = 10
         incoming = incoming_hz * seconds
