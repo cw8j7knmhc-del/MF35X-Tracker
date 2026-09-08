@@ -4,18 +4,14 @@
 #include <freertos/task.h>
 
 // ==================================================
-// NAECHSTER USB-STAND - PUNKT 1B
-// RENNAUFZEICHNUNG DARF LIVE-BETRIEB NICHT BLOCKIEREN
+// NAECHSTER USB-STAND - PUNKT 1B + PUNKT 2
+// RENNNETZWERK ENTKOPPELT + ATOMARE COMPANION-DATEN
 // ==================================================
-// Ziel:
-// - Capture bleibt im eigenen Race-Timing-Task.
-// - Die normale Arduino-loop() macht fuer Rennsamples KEINEN HTTP-Aufruf.
-// - Ein verarbeiteter Rennsample wird zuerst dauerhaft in LittleFS abgelegt.
-// - Oeldruck-/RPM-Diagnose wird ebenfalls nur lokal gepuffert.
-// - Ein eigener Background-Task sendet Basisdaten und Diagnose zu Firebase.
-//
-// Damit koennen Firebase-/LTE-Timeouts die Live-Website nicht mehr direkt
-// durch rennbezogene PUT/PATCH/GET-Aufrufe blockieren.
+// - normale Arduino-loop() macht fuer Rennsamples keinen HTTP-Aufruf
+// - Capture erfolgt atomar in race_timing_fix.hpp
+// - Basisrecord + Oeldruckdiagnose + RPM/GPIO11-Diagnose werden hier mit
+//   exakt derselben sequence dauerhaft lokal gespeichert
+// - erst ein separater Background-Task sendet alles zu Firebase
 // ==================================================
 
 constexpr uint32_t MF35X_RACE_UPLOAD_TASK_STACK = 6144;
@@ -30,69 +26,43 @@ volatile uint32_t mf35xRacePersistErrors = 0;
 volatile uint32_t mf35xRaceBackgroundLoops = 0;
 unsigned long mf35xRaceLastStatsUploadMs = 0;
 
-void mf35xRaceQueueOilDiagLocal(const String& raceId, uint32_t sequence) {
-  if (!offlineBufferReady || !offlineRaceIdGueltig(raceId) || sequence == 0) return;
-
-  if (mf35xDiagRaceId != raceId) {
-    mf35xDiagStatsReset(raceId);
-  }
-
-  // Statistik bleibt lokal; der Netzwerk-Upload erfolgt ausschliesslich im
-  // Background-Task.
-  mf35xDiagStatsAdd(oilPressureBar);
-
-  Mf35xOilDiagRecord rec = {};
-  rec.magic = MF35X_DIAG_MAGIC;
-  rec.version = MF35X_DIAG_VERSION;
-  rec.size = sizeof(rec);
-  rec.bootId = offlineBootId;
-  rec.sequence = sequence;
-  rec.rawAdc = mf35xDiagRawAdc();
-  rec.diagState = mf35xDiagStateNow();
-  rec.gpio11 = schaltausgangAktiv ? 1 : 0;
-  rec.state = MF35X_DIAG_PENDING;
-  rec.crc32 = mf35xDiagRecordCrc(rec);
-
-  // Kein direkter PATCH hier. Diagnose ist weniger wichtig als der
-  // Basissample; die bestehende Flash-Schutzlogik entscheidet bei Platzmangel.
-  mf35xDiagQueueAppend(raceId, rec);
-}
-
-void mf35xRaceQueueRpmDiagLocal(const String& raceId, uint32_t sequence) {
-  if (!offlineBufferReady || !offlineRaceIdGueltig(raceId) || sequence == 0) return;
-
-  const Mf35xRpmDiagRecord rec = mf35xRpmDiagBuild(sequence);
-
-  // Kein direkter PATCH hier. Nur lokale Companion-Queue.
-  mf35xRpmDiagQueueAppend(raceId, rec);
-}
-
 void mf35xRacePersistOne() {
-  // Aufnahme-Konfiguration fuer den Capture-Task synchronisieren.
   mf35xRaceTimingConfigSync();
 
-  // Falls der Capture-Task nicht gestartet werden konnte, bleibt die alte
-  // Funktion als Notfall-Fallback erhalten. Im Normalbetrieb wird dieser Pfad
-  // niemals benutzt.
+  // Nur Notfall-Fallback. Im Normalbetrieb ist der eigene Timing-Task aktiv.
   if (!mf35xRaceTimingQueue || !mf35xRaceTimingTaskHandle) {
     rennhistorieBearbeiten();
     return;
   }
 
   Mf35xTimedRaceCapture item = {};
-  if (xQueueReceive(mf35xRaceTimingQueue, &item, 0) != pdTRUE) {
+  if (xQueueReceive(mf35xRaceTimingQueue, &item, 0) != pdTRUE) return;
+
+  const String raceId(item.raceId);
+  if (!offlineRaceIdGueltig(raceId)) {
+    historyFehler++;
+    mf35xRacePersistErrors++;
+    mf35xRaceTimingProcessed++;
     return;
   }
 
-  OfflineRaceRecord rec = item.rec;
-  rec.sequence = ++offlineSampleSequence;
-  rec.crc32 = offlineRecordCrc(rec);
-  const String raceId(item.raceId);
+  // EIN gemeinsamer Sample-Key fuer Basis + beide Diagnosen.
+  const uint32_t sequence = ++offlineSampleSequence;
+  item.rec.sequence = sequence;
+  item.oilDiag.sequence = sequence;
+  item.rpmDiag.sequence = sequence;
 
-  // WICHTIG: Immer zuerst dauerhaft puffern. Dadurch macht dieser Pfad
-  // keinerlei Firebase-/HTTPS-Aufruf und ist nach dem Flash-Schreiben auch
-  // gegen einen anschliessenden Netzausfall abgesichert.
-  if (!offlineRecordDauerhaftPuffern(raceId, rec)) {
+  item.rec.bootId = offlineBootId;
+  item.oilDiag.bootId = offlineBootId;
+  item.rpmDiag.bootId = offlineBootId;
+
+  item.rec.crc32 = offlineRecordCrc(item.rec);
+  item.oilDiag.crc32 = mf35xDiagRecordCrc(item.oilDiag);
+  item.rpmDiag.crc32 = mf35xRpmDiagRecordCrc(item.rpmDiag);
+
+  // Basisdaten haben immer Prioritaet. Nur wenn der Basissample sicher in
+  // LittleFS liegt, werden die Companion-Diagnosen angehaengt.
+  if (!offlineRecordDauerhaftPuffern(raceId, item.rec)) {
     historyFehler++;
     mf35xRacePersistErrors++;
     mf35xRaceTimingProcessed++;
@@ -102,10 +72,18 @@ void mf35xRacePersistOne() {
   mf35xRacePersisted++;
   mf35xRaceTimingProcessed++;
 
-  // Zusatzdiagnosen ebenfalls nur lokal erfassen. Punkt 2 wird diese Werte
-  // anschliessend noch in denselben atomaren Capture-Zeitpunkt integrieren.
-  mf35xRaceQueueOilDiagLocal(raceId, rec.sequence);
-  mf35xRaceQueueRpmDiagLocal(raceId, rec.sequence);
+  // Statistik verwendet exakt den beim atomaren Capture eingefrorenen Wert.
+  if (isfinite(item.oilPressureBarForStats)) {
+    if (mf35xDiagRaceId != raceId) {
+      mf35xDiagStatsReset(raceId);
+    }
+    mf35xDiagStatsAdd(item.oilPressureBarForStats);
+  }
+
+  // KEIN erneutes Lesen von rpm/oilPressure/gpio11 an dieser Stelle.
+  // Die Records stammen unveraendert vom gemeinsamen Capture-Zeitpunkt.
+  mf35xDiagQueueAppend(raceId, item.oilDiag);
+  mf35xRpmDiagQueueAppend(raceId, item.rpmDiag);
 }
 
 void mf35xRaceUploadTask(void*) {
@@ -113,15 +91,16 @@ void mf35xRaceUploadTask(void*) {
     mf35xRaceBackgroundLoops++;
 
     if (WiFi.status() == WL_CONNECTED) {
-      // Reihenfolge absichtlich Basis -> Oeldruck -> RPM. Companion-Diagnosen
-      // pruefen beim Replay, ob der Basissample bereits in Firebase existiert.
+      // Basis zuerst. Companion-Diagnosen werden erst danach an genau denselben
+      // Sample-Key gepatcht.
       offlineDrainBearbeiten();
       mf35xDiagDrainOne();
       mf35xRpmDiagDrainOne();
 
       const unsigned long now = millis();
       if (mf35xDiagRaceId.length() > 0 && mf35xDiagCount > 0 &&
-          (unsigned long)(now - mf35xRaceLastStatsUploadMs) >= MF35X_RACE_STATS_UPLOAD_MS) {
+          (unsigned long)(now - mf35xRaceLastStatsUploadMs) >=
+            MF35X_RACE_STATS_UPLOAD_MS) {
         mf35xRaceLastStatsUploadMs = now;
         mf35xDiagStatsUpload();
       }
@@ -151,13 +130,12 @@ void mf35xRaceNetworkIsolationSetup() {
   }
 
   Serial.println(
-    "RACE-UPLOAD: Firebase/HTTPS fuer Rennhistorie vom Live-Loop entkoppelt"
+    "RACE-UPLOAD: Netzwerk entkoppelt; atomare Rennsamples aktiv"
   );
 }
 
 void mf35xRaceNoNetworkHousekeeping() {
-  // V5.9.17-Maxwert-Plausibilisierung bleibt erhalten, verursacht aber keinen
-  // Netzwerkzugriff.
+  // Nur lokale/Plausibilitaetsarbeit. Keine rennbezogenen HTTP-Zugriffe.
   mf35xMaxPlausibilisieren();
 
   if (!recordingConfig.enabled || recordingConfig.raceId.length() == 0) {
