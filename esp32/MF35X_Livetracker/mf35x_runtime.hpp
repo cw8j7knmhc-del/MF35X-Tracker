@@ -23,6 +23,7 @@ void jsonLongFeld(String& json, bool& erstesFeld, const char* key, long wert) {
 #include "v5917_patch.hpp"
 #include "v5918_rpm_diagnostics.hpp"
 #include "connectivity_diagnostics.hpp"
+#include "connectivity_queue_repair.hpp"
 #include "race_timing_fix.hpp"
 #include "fast_track_logger.hpp"
 #include "race_network_isolation.hpp"
@@ -33,6 +34,10 @@ void mf35xRuntimeSetup() {
   // Bestehende, getestete Subsysteme.
   mf35xV5917PatchSetup();
   mf35xV5918RpmDiagSetup();
+
+  // Nach LittleFS-Initialisierung zuerst eventuelle Teilrecords eines
+  // Stromausfalls entfernen, bevor neue Netzwerkdiagnosen angehaengt werden.
+  mf35xNetDiagRepairQueueFiles();
 
   // Hintergrundaufgaben des naechsten USB-Stands.
   mf35xConnectivityDiagnosticsSetup();
