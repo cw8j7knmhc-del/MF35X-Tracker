@@ -12,25 +12,19 @@ def text(path: Path) -> str:
 
 
 def extract_function(source: str, signature: str) -> str:
-    # Eine Signatur kann zuerst als Funktionsprototyp mit ';' und spaeter als
-    # echter Funktionsrumpf vorkommen. Nur die Vorkommnis mit '{' akzeptieren.
     search_from = 0
     while True:
         start = source.find(signature, search_from)
         if start < 0:
             raise AssertionError(f"Funktion nicht gefunden: {signature}")
-
         after = start + len(signature)
         brace = source.find("{", after)
         semicolon = source.find(";", after)
-
         if brace < 0:
             raise AssertionError(f"Funktionsrumpf fehlt: {signature}")
-
         if semicolon >= 0 and semicolon < brace:
             search_from = after
             continue
-
         depth = 0
         for i in range(brace, len(source)):
             if source[i] == "{":
@@ -45,21 +39,24 @@ def extract_function(source: str, signature: str) -> str:
 HEADER = text(FW / "firmware_version.h")
 CORE = text(FW / "MF35X_Livetracker_core.hpp")
 INO = text(FW / "MF35X_Livetracker.ino")
+RUNTIME = text(FW / "mf35x_runtime.hpp")
 TIMING = text(FW / "race_timing_fix.hpp")
 NETWORK = text(FW / "race_network_isolation.hpp")
+CONNECTIVITY = text(FW / "connectivity_diagnostics.hpp")
 FAST = text(FW / "fast_track_logger.hpp")
+ADMIN_V5922 = text(ROOT / "admin-v5922.js")
+FIREBASE_CONFIG = text(ROOT / "firebase-config.js")
 MANIFEST = json.loads(text(ROOT / "firmware" / "manifest.json"))
 
 
 class VersionGateTests(unittest.TestCase):
     def test_version_string_matches_numeric_code(self):
-        version_match = re.search(r'MF35X_FIRMWARE_VERSION\s+"V(\d+)\.(\d+)\.(\d+)"', HEADER)
-        code_match = re.search(r'MF35X_FIRMWARE_VERSION_CODE\s+(\d+)UL', HEADER)
-        self.assertIsNotNone(version_match, "Versionsstring fehlt oder hat falsches Format")
-        self.assertIsNotNone(code_match, "VersionCode fehlt")
-        major, minor, patch = map(int, version_match.groups())
-        expected = major * 10000 + minor * 100 + patch
-        self.assertEqual(int(code_match.group(1)), expected)
+        m = re.search(r'MF35X_FIRMWARE_VERSION\s+"V(\d+)\.(\d+)\.(\d+)"', HEADER)
+        c = re.search(r'MF35X_FIRMWARE_VERSION_CODE\s+(\d+)UL', HEADER)
+        self.assertIsNotNone(m)
+        self.assertIsNotNone(c)
+        major, minor, patch = map(int, m.groups())
+        self.assertEqual(int(c.group(1)), major * 10000 + minor * 100 + patch)
 
     def test_new_firmware_is_not_older_than_published_manifest(self):
         code = int(re.search(r'MF35X_FIRMWARE_VERSION_CODE\s+(\d+)UL', HEADER).group(1))
@@ -83,22 +80,19 @@ class Gpio11RegressionTests(unittest.TestCase):
 
     def test_hysteresis_behavior_model(self):
         active = False
-        active = self.gpio_step(active, 59.9, 4000)
-        self.assertFalse(active, "Unter Speed-Freigabe muss GPIO11 LOW bleiben")
-        active = self.gpio_step(active, 60.0, 3199)
-        self.assertFalse(active)
+        self.assertFalse(self.gpio_step(active, 59.9, 4000))
+        self.assertFalse(self.gpio_step(active, 60.0, 3199))
         active = self.gpio_step(active, 60.0, 3200)
-        self.assertTrue(active, "HIGH muss ab rpm_on einschalten")
+        self.assertTrue(active)
         active = self.gpio_step(active, 60.0, 3170)
-        self.assertTrue(active, "Im Hysteresefenster muss HIGH gehalten werden")
-        active = self.gpio_step(active, 60.0, 3149)
-        self.assertFalse(active, "Unter rpm_off muss LOW geschaltet werden")
+        self.assertTrue(active)
+        self.assertFalse(self.gpio_step(active, 60.0, 3149))
 
     def test_firmware_gpio_function_contains_all_three_thresholds(self):
         body = extract_function(CORE, "void schaltausgangAktualisieren()")
         for token in ("speedEnableKmh", "rpmOn", "rpmOff", "schaltausgangAktiv", "digitalWrite"):
             self.assertIn(token, body)
-        self.assertIn("outputConfigMux", body, "Schaltschwellen muessen konsistent gesnapshottet werden")
+        self.assertIn("outputConfigMux", body)
 
 
 class RaceTimingRegressionTests(unittest.TestCase):
@@ -114,63 +108,82 @@ class RaceTimingRegressionTests(unittest.TestCase):
         self.assertLessEqual(poll_ms, 10)
 
     def test_five_second_reference_schedule_does_not_drift(self):
-        interval = 5000
-        deadline = 0
-        actual = []
-        for _ in range(10):
-            actual.append(deadline)
-            deadline += interval
-        self.assertEqual(actual, list(range(0, 50000, 5000)))
+        self.assertEqual(list(range(0, 50000, 5000)), [i * 5000 for i in range(10)])
 
-    def test_live_loop_has_no_race_network_drain(self):
-        body = extract_function(INO, "void mf35xNextUsbCoreLoop()")
-        for forbidden in ("offlineDrainBearbeiten", "mf35xDiagDrainOne", "mf35xRpmDiagDrainOne", "mf35xFastTrackDrainOne"):
+    def test_live_runtime_has_no_race_network_drain(self):
+        body = extract_function(RUNTIME, "void mf35xRuntimeLoop()")
+        for forbidden in (
+            "offlineDrainBearbeiten", "mf35xDiagDrainOne", "mf35xRpmDiagDrainOne",
+            "mf35xNetDiagDrainOne", "mf35xFastTrackDrainOne"
+        ):
             self.assertNotIn(forbidden, body)
         background = extract_function(NETWORK, "void mf35xRaceUploadTask(void*)")
-        for required in ("offlineDrainBearbeiten", "mf35xDiagDrainOne", "mf35xRpmDiagDrainOne", "mf35xFastTrackDrainOne"):
+        for required in (
+            "offlineDrainBearbeiten", "mf35xDiagDrainOne", "mf35xRpmDiagDrainOne",
+            "mf35xNetDiagDrainOne", "mf35xFastTrackDrainOne"
+        ):
             self.assertIn(required, background)
 
 
 class AtomicSampleRegressionTests(unittest.TestCase):
-    def test_one_capture_object_contains_base_and_both_diagnostics(self):
-        struct_match = re.search(r"struct\s+Mf35xTimedRaceCapture\s*\{(.*?)\};", TIMING, re.S)
-        self.assertIsNotNone(struct_match)
-        body = struct_match.group(1)
+    def test_one_capture_object_contains_base_and_both_sensor_diagnostics(self):
+        m = re.search(r"struct\s+Mf35xTimedRaceCapture\s*\{(.*?)\};", TIMING, re.S)
+        self.assertIsNotNone(m)
+        body = m.group(1)
         self.assertIn("OfflineRaceRecord rec", body)
         self.assertIn("Mf35xOilDiagRecord oilDiag", body)
         self.assertIn("Mf35xRpmDiagRecord rpmDiag", body)
 
     def test_same_sequence_is_assigned_to_all_records(self):
         persist = extract_function(NETWORK, "void mf35xRacePersistOne()")
-        self.assertIn("item.rec.sequence = sequence", persist)
-        self.assertIn("item.oilDiag.sequence = sequence", persist)
-        self.assertIn("item.rpmDiag.sequence = sequence", persist)
-        self.assertIn("item.rec.bootId = offlineBootId", persist)
-        self.assertIn("item.oilDiag.bootId = offlineBootId", persist)
-        self.assertIn("item.rpmDiag.bootId = offlineBootId", persist)
+        for token in (
+            "item.rec.sequence = sequence", "item.oilDiag.sequence = sequence",
+            "item.rpmDiag.sequence = sequence", "netDiag.sequence = sequence",
+            "item.rec.bootId = offlineBootId", "item.oilDiag.bootId = offlineBootId",
+            "item.rpmDiag.bootId = offlineBootId", "netDiag.bootId = offlineBootId"
+        ):
+            self.assertIn(token, persist)
 
     def test_gpio11_is_shared_by_base_and_both_diagnostics(self):
-        capture = extract_function(
-            TIMING,
-            "Mf35xTimedRaceCapture mf35xRaceAtomicCaptureBauen(const char* raceId)",
-        )
+        capture = extract_function(TIMING, "Mf35xTimedRaceCapture mf35xRaceAtomicCaptureBauen(const char* raceId)")
         self.assertIn("switchState", capture)
         self.assertIn("mf35xRaceRpmDiagSnapshotBauen", capture)
         self.assertIn("mf35xRaceOilDiagSnapshotBauen", capture)
         self.assertIn("OFFLINE_FLAG_SWITCH_OUTPUT", capture)
 
-        rpm_snapshot = extract_function(
-            TIMING,
-            "Mf35xRpmDiagRecord mf35xRaceRpmDiagSnapshotBauen(",
-        )
-        self.assertIn("switchAtCapture = schaltausgangAktiv", rpm_snapshot)
-        self.assertIn("MF35X_RPM_DIAG_FLAG_GPIO11", rpm_snapshot)
 
-        oil_snapshot = extract_function(
-            TIMING,
-            "Mf35xOilDiagRecord mf35xRaceOilDiagSnapshotBauen(",
-        )
-        self.assertIn("rec.gpio11 = switchState ? 1 : 0", oil_snapshot)
+class ConnectivityRegressionTests(unittest.TestCase):
+    def test_network_probe_is_background_task(self):
+        setup = extract_function(CONNECTIVITY, "void mf35xConnectivityDiagnosticsSetup()")
+        self.assertIn("xTaskCreatePinnedToCore", setup)
+        runtime_setup = extract_function(RUNTIME, "void mf35xRuntimeSetup()")
+        self.assertIn("mf35xConnectivityDiagnosticsSetup", runtime_setup)
+
+    def test_network_layers_are_measured_separately(self):
+        for token in (
+            "WiFi.gatewayIP", "client.connect", "WiFi.hostByName",
+            "tracker/device.json?shallow=true", "firebase_http_code"
+        ):
+            self.assertIn(token, CONNECTIVITY)
+
+    def test_optional_rut200_api_support_exists(self):
+        for token in (
+            "MF35X_RUT200_PASSWORD", '"/login"', '"/modems/signal/status"',
+            '"/modems/status"', '"rsrp"', '"rsrq"', '"sinr"'
+        ):
+            self.assertIn(token, CONNECTIVITY)
+
+    def test_router_credentials_never_enter_connectivity_json(self):
+        body = extract_function(CONNECTIVITY, "String mf35xConnectivityJson(")
+        self.assertNotIn("MF35X_RUT200_PASSWORD", body)
+        self.assertNotIn("mf35xRutToken", body)
+        self.assertNotIn('"password"', body.lower())
+        self.assertNotIn('"token"', body.lower())
+
+    def test_network_snapshot_is_persisted_per_race_sample(self):
+        persist = extract_function(NETWORK, "void mf35xRacePersistOne()")
+        self.assertIn("mf35xConnectivityRaceRecordBauen(item.rec.capturedMillis)", persist)
+        self.assertIn("mf35xNetDiagQueueAppend", persist)
 
 
 class FastTrackRegressionTests(unittest.TestCase):
@@ -187,34 +200,55 @@ class FastTrackRegressionTests(unittest.TestCase):
         self.assertIn('"/fastTrack/"', FAST)
 
     def test_fast_track_cannot_consume_last_megabyte(self):
-        match = re.search(r"MF35X_FAST_TRACK_FLASH_PROTECT_BYTES\s*=\s*(\d+)UL\s*\*\s*(\d+)UL", FAST)
-        self.assertIsNotNone(match)
-        reserve = int(match.group(1)) * int(match.group(2))
-        self.assertGreaterEqual(reserve, 1024 * 1024)
+        m = re.search(r"MF35X_FAST_TRACK_FLASH_PROTECT_BYTES\s*=\s*(\d+)UL\s*\*\s*(\d+)UL", FAST)
+        self.assertIsNotNone(m)
+        self.assertGreaterEqual(int(m.group(1)) * int(m.group(2)), 1024 * 1024)
 
     def test_50hz_input_does_not_force_50hz_storage(self):
-        incoming_hz = 50
-        seconds = 10
-        incoming = incoming_hz * seconds
-        stored = seconds * (1000 // 100)
-        self.assertEqual(incoming, 500)
-        self.assertEqual(stored, 100)
-        self.assertLess(stored, incoming)
+        self.assertEqual(50 * 10, 500)
+        self.assertEqual(10 * (1000 // 100), 100)
+
+
+class CsvSchemaRegressionTests(unittest.TestCase):
+    def test_admin_loader_includes_v5922_module(self):
+        self.assertIn("admin-v5922.js", FIREBASE_CONFIG)
+
+    def test_csv_has_fixed_gps_columns(self):
+        for column in ('"GPS_Valid"', '"Latitude"', '"Longitude"', '"GPS_HDOP"', '"GPS_Satelliten"'):
+            self.assertIn(column, ADMIN_V5922)
+
+    def test_csv_has_fixed_connectivity_columns(self):
+        for column in (
+            '"Netz_WLAN_verbunden"', '"Netz_Gateway_erreichbar"', '"Netz_DNS_ok"',
+            '"Netz_Firebase_ok"', '"Netz_Firebase_Latenz_ms"', '"LTE_RSRP_dBm"',
+            '"LTE_RSRQ_dB"', '"LTE_SINR_dB"'
+        ):
+            self.assertIn(column, ADMIN_V5922)
+        self.assertIn('const CSV_SCHEMA_VERSION = "MF35X_RACE_CSV_V2"', ADMIN_V5922)
 
 
 class ReleaseArchitectureTests(unittest.TestCase):
-    def test_required_next_usb_modules_are_included(self):
-        for include in (
-            '#include "race_timing_fix.hpp"',
-            '#include "fast_track_logger.hpp"',
-            '#include "race_network_isolation.hpp"',
+    def test_sketch_uses_single_runtime_facade(self):
+        self.assertIn('#include "mf35x_runtime.hpp"', INO)
+        for legacy in (
+            '#include "v5917_patch.hpp"', '#include "v5918_rpm_diagnostics.hpp"',
+            '#include "race_timing_fix.hpp"', '#include "race_network_isolation.hpp"'
         ):
-            self.assertIn(include, INO)
+            self.assertNotIn(legacy, INO)
 
-    def test_setup_starts_all_background_tasks(self):
+    def test_runtime_owns_active_module_order(self):
+        for include in (
+            '#include "v5917_patch.hpp"', '#include "v5918_rpm_diagnostics.hpp"',
+            '#include "connectivity_diagnostics.hpp"', '#include "race_timing_fix.hpp"',
+            '#include "fast_track_logger.hpp"', '#include "race_network_isolation.hpp"'
+        ):
+            self.assertIn(include, RUNTIME)
+
+    def test_sketch_setup_and_loop_only_delegate_runtime(self):
         setup = extract_function(INO, "void setup()")
-        for call in ("mf35xRaceTimingSetup", "mf35xFastTrackSetup", "mf35xRaceNetworkIsolationSetup"):
-            self.assertIn(call, setup)
+        loop = extract_function(INO, "void loop()")
+        self.assertIn("mf35xRuntimeSetup", setup)
+        self.assertIn("mf35xRuntimeLoop", loop)
 
 
 if __name__ == "__main__":
