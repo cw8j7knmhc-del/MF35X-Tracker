@@ -1,0 +1,39 @@
+net,endpoint_a,endpoint_b,status,source,notes
++5V_IN,J2.PIN1,U1.5V_IN,PARTIAL,Freenove FNK0099A documentation,Board expects 5 V; exact DC/DC source and protection in final box still to confirm
++3V3,U1.3V3,U2.VDD,VERIFIED,project wiring + firmware,ADS1115 VDD is on ESP32 3V3
+GND,U1.GND,U2.GND,VERIFIED,project wiring,Common ESP32/ADS1115 ground
+GND,U2.ADDR,GND,VERIFIED,project wiring,ADS1115 ADDR tied to GND -> address 0x48
+I2C_SDA,U1.GPIO8,U2.SDA,VERIFIED,hardware/pinout.csv + firmware,I2C data
+I2C_SCL,U1.GPIO9,U2.SCL,VERIFIED,hardware/pinout.csv + firmware,I2C clock
+RPM_IN,U1.GPIO10,U5.OUTPUT_SIGNAL,PARTIAL,hardware/pinout.csv + project wiring,HY-M154 output feeds GPIO10; exact channel terminal jumper pull-up and output-ground arrangement still to confirm
+W_TERMINAL,VEHICLE.W,U5.W_INPUT,PARTIAL,project design,W terminal enters optocoupler input side; do not connect raw W signal directly to ESP32
+HY_INPUT_GND_TODO,U5.INPUT_GND,VEHICLE_GND_OR_ISOLATED_RETURN,TODO,not yet physically documented,Confirm input-side return and jumper state
+HY_OUTPUT_GND_TODO,U5.OUTPUT_GND,ESP32_GND_OR_ISOLATED_RETURN,TODO,not yet physically documented,Confirm output-side ground/reference and whether isolation jumper is fitted
+EXT_OUTPUT_LOGIC,U1.GPIO11,J1.PIN1,VERIFIED,hardware/pinout.csv + firmware,3.3 V logic output
+EXT_OUTPUT_GND_TODO,J1.PIN2,GND_OR_DRIVER_RETURN,TODO,not yet physically documented,Confirm external load/driver stage and reference ground
+TC_CLK,U1.GPIO12,U4.CLK,VERIFIED,hardware/pinout.csv + firmware,MAX31855 clock
+TC_CS,U1.GPIO13,U4.CS,VERIFIED,hardware/pinout.csv + firmware,MAX31855 chip select
+TC_DO,U4.DO,U1.GPIO14,VERIFIED,hardware/pinout.csv + firmware,MAX31855 data output to ESP32
+MAX31855_VCC_TODO,U4.VCC,3V3_OR_5V,TODO,not yet physically documented,Confirm exact breakout module supply voltage used in trackerbox
+GND,U4.GND,GND,PARTIAL,expected module wiring,Confirm actual breakout ground terminal on installed module
+THERMOCOUPLE_TP,U4.T+,KTYPE.T+,PARTIAL,project design,K-type cylinder-head thermocouple positive
+THERMOCOUPLE_TM,U4.T-,KTYPE.T-,PARTIAL,project design,K-type cylinder-head thermocouple negative
+GPS_TX_TO_ESP_RX,U3.TX,U1.GPIO16,VERIFIED,hardware/pinout.csv + firmware,GPS TX to ESP32 UART2 RX
+ESP_TX_TO_GPS_RX,U1.GPIO17,U3.RX,VERIFIED,hardware/pinout.csv + firmware,ESP32 UART2 TX to GPS RX
+GND,U3.GND,GND,PARTIAL,project design,Common GPS ground expected; verify installed module connector
+GPS_VCC_TODO,U3.VCC,3V3_OR_5V,TODO,not yet physically documented,Exact installed GPS module supply connection must be confirmed
++3V3,U1.3V3,R1.1,DERIVED,firmware divider equation,Oil-temp fixed resistor high side
+OIL_TEMP_SENSE,R1.2,U2.AIN0,VERIFIED,hardware/pinout.csv + firmware,ADS1115 AIN0 oil temperature
+OIL_TEMP_SENSE,R1.2,J3.SENSE,DERIVED,firmware divider equation,Node between 980 ohm fixed resistor and VDO NTC
+GND,J3.RETURN_GND,GND,PARTIAL,sensor topology,Confirm whether installed VDO sender uses separate return or case/engine ground
++3V3,U1.3V3,R2.1,DERIVED,firmware divider equation,Oil-pressure fixed resistor high side; firmware calculation uses measured 3.27 V rail value
+OIL_PRESSURE_SENSE,R2.2,U2.AIN1,VERIFIED,hardware/pinout.csv + firmware,ADS1115 AIN1 oil pressure
+OIL_PRESSURE_SENSE,R2.2,J4.SENSE,DERIVED,firmware divider equation,Node between fixed resistor and pressure sender
+GND,J4.RETURN_GND,GND,PARTIAL,sensor topology,Confirm whether installed pressure sender return is dedicated or case ground
+BATTERY_PLUS,J5.PIN1,R3.1,DERIVED,firmware voltage divider,Vehicle battery sense input to 100k upper resistor
+GND,J5.PIN2,GND,PARTIAL,project design,Vehicle/sensor ground return
+BATTERY_SENSE,R3.2,U2.AIN2,VERIFIED,hardware/pinout.csv + firmware,ADS1115 AIN2 battery voltage
+BATTERY_SENSE,R3.2,R4.1,DERIVED,firmware voltage divider,100k/10k divider midpoint
+GND,R4.2,GND,DERIVED,firmware voltage divider,10k lower resistor to ground
+GPIO0_RESERVED,U1.GPIO0,NC_RESERVED,VERIFIED,hardware/pinout.csv,Must remain unused because of boot/strapping requirement
+ADS_AIN3_UNUSED,U2.AIN3,NC_UNUSED,VERIFIED,firmware,AIN3 not used by tracker firmware
