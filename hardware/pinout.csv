@@ -1,0 +1,14 @@
+category,symbol,value,connection,notes
+GPIO,I2C_SDA,8,ADS1115 SDA,I2C data
+GPIO,I2C_SCL,9,ADS1115 SCL,I2C clock
+GPIO,RPM_PIN,10,HY-M154 output / W-signal,RPM interrupt input
+GPIO,SCHALTAUSGANG_PIN,11,external 3.3V logic output,control output
+GPIO,MAX31855_CLK,12,MAX31855 CLK,cylinder-head thermocouple
+GPIO,MAX31855_CS,13,MAX31855 CS,cylinder-head thermocouple
+GPIO,MAX31855_DO,14,MAX31855 DO,cylinder-head thermocouple
+GPIO,GPS_RX,16,GPS TX -> ESP32 RX,UART2 receive
+GPIO,GPS_TX,17,ESP32 TX -> GPS RX,UART2 transmit
+ADS,ADS_KANAL_OELTEMP,0,ADS1115 AIN0,oil temperature
+ADS,ADS_KANAL_OELDRUCK,1,ADS1115 AIN1,oil pressure
+ADS,ADS_KANAL_BATTERIE,2,ADS1115 AIN2,battery voltage
+RESERVED,GPIO0,0,must remain unused,boot/strapping safety requirement
