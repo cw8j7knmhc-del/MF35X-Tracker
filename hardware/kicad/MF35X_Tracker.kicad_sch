@@ -186,7 +186,6 @@
       (property "Datasheet" "~" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))
       (symbol "HY_M154_0_1"
         (rectangle (start -5.50 -3.81) (end 5.50 3.81) (stroke (width 0.254) (type default)) (fill (type background)))
-        (line (start 0.00 -3.34) (end 0.00 3.34) (stroke (width 0.254) (type dash)))
       (pin passive line (at -8.00 1.27 180) (length 2.54)
         (name "J2_OUT" (effects (font (size 1.0 1.0))))
         (number "1" (effects (font (size 1.0 1.0))))
@@ -215,9 +214,7 @@
       (property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))
       (property "Datasheet" "~" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))
       (symbol "Conn_01x02_0_1"
-        (rectangle (start -1.50 -2.20) (end 2.50 2.20) (stroke (width 0.254) (type default)) (fill (type background)))
-        (line (start 0.00 -1.27) (end 1.20 -1.27) (stroke (width 0.254) (type default)))
-        (line (start 0.00 1.27) (end 1.20 1.27) (stroke (width 0.254) (type default)))
+        (rectangle (start -2.20 -2.20) (end 2.20 2.20) (stroke (width 0.254) (type default)) (fill (type background)))
       (pin passive line (at -8.00 1.27 180) (length 2.54)
         (name "PIN1" (effects (font (size 1.0 1.0))))
         (number "1" (effects (font (size 1.0 1.0))))
@@ -252,7 +249,6 @@
       (property "Datasheet" "~" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))
       (symbol "SENSOR_CASE_0_1"
         (rectangle (start -3.20 -3.20) (end 3.20 3.20) (stroke (width 0.254) (type default)) (fill (type background)))
-        (line (start -2.20 2.20) (end 2.20 -2.20) (stroke (width 0.254) (type default)))
       (pin passive line (at -8.00 1.27 180) (length 2.54)
         (name "SENSE" (effects (font (size 1.0 1.0))))
         (number "1" (effects (font (size 1.0 1.0))))
