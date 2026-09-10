@@ -1,0 +1,42 @@
+name: One-time KiCad coordinate repair
+
+on:
+  push:
+    branches: [hardware/kicad-schematic-v1]
+    paths:
+      - '.github/workflows/kicad-coordinate-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: hardware/kicad-schematic-v1
+
+      - name: Fix KiCad local-to-sheet Y transform and regenerate
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('hardware/kicad/gen_schematic.py')
+          s = p.read_text(encoding='utf-8')
+          old = 'sym.y + pin.y'
+          count = s.count(old)
+          if count != 2:
+              raise SystemExit(f'Expected exactly 2 old Y transforms, found {count}')
+          s = s.replace(old, 'sym.y - pin.y')
+          p.write_text(s, encoding='utf-8')
+          PY
+          python hardware/kicad/gen_schematic.py
+
+      - name: Commit repaired generator and schematic
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hardware/kicad/gen_schematic.py hardware/kicad/MF35X_Tracker.kicad_sch
+          git commit -m "Fix KiCad symbol Y-axis mapping"
+          git push
