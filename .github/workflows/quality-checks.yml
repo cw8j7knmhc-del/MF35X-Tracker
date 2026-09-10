@@ -21,8 +21,8 @@ permissions:
   contents: read
 
 jobs:
-  hardware-pinout:
-    name: Hardware / firmware pinout
+  static-tests:
+    name: Hardware and diagnostic checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -35,6 +35,9 @@ jobs:
 
       - name: Check hardware pinout consistency
         run: python tests/check_hardware_pinout.py
+
+      - name: Self-test race CSV regression checker
+        run: python tests/check_race_csv.py --self-test
 
   firmware-compile:
     name: ESP32-S3 compile (no signing)
