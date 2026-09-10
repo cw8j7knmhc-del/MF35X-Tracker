@@ -239,9 +239,9 @@ def build() -> str:
             sym, pin = lookup[endpoint]
             key = f"{sym.ref}.{pin.name}"
             if status in {"NC_RESERVED", "NC_UNUSED"}:
-                ncs.add((key, sym.x + pin.x, sym.y + pin.y))
+                ncs.add((key, sym.x + pin.x, sym.y - pin.y))
             else:
-                labels.add((key, net, sym.x + pin.x, sym.y + pin.y))
+                labels.add((key, net, sym.x + pin.x, sym.y - pin.y))
 
     out = [
         "(kicad_sch",
