@@ -1,9 +1,10 @@
 #pragma once
 
-// Robuste W-Signal-Auswertung fuer V5.9.19.
+// Robuste W-Signal-Auswertung fuer V5.9.20.
 // Ziel:
 // - kurze Stoerflanken und echte Doppel-Flanken nicht als Motordrehzahl werten
 // - bei fehlenden Pulsen eine 2x/3x/4x-Luecke korrekt normalisieren
+// - echte dauerhafte Frequenzspruenge nicht als wiederholte Pulsluecken aliasen
 // - GPIO11 weiterhin im schnellen, netzunabhaengigen Control-Task steuern
 // - Roh-/Filterzaehler fuer die Rennanalyse bereitstellen
 // - bei Neuerfassung niemals direkt auf eine 0,5x-Doppelflanke einlernen
@@ -233,10 +234,15 @@ void IRAM_ATTR mf35xStabileRpmISR() {
       if (!wahrscheinlicheDoppelflanke &&
           periodeUs >= minUs && periodeUs <= maxUs) {
         gueltig = true;
-      } else if (!wahrscheinlicheDoppelflanke && periodeUs > maxUs) {
-        // Falls ein echter W-Puls einmal fehlt, ist der naechste Abstand etwa
-        // 2x, 3x ... so gross. Dann wird die Luecke auf eine Einzelperiode
-        // normiert statt faelschlich als Drehzahleinbruch gewertet.
+      } else if (!wahrscheinlicheDoppelflanke &&
+                 periodeUs > maxUs &&
+                 mf35xRpmFehlerInFolge == 0) {
+        // V5.9.20: Lueckennormalisierung ist nur beim ersten auffaelligen
+        // Abstand erlaubt. Sobald bereits eine nicht plausible Rohflanke
+        // verworfen wurde, ist der Abstand seit dem letzten akzeptierten Puls
+        // kein sicherer Beleg mehr fuer einen wirklich fehlenden W-Puls.
+        // Dadurch koennen dauerhafte neue Frequenzen nicht periodisch als
+        // 2x/3x/4x-Luecke auf die alte Referenz zurueckgefaltet werden.
         for (uint8_t faktor = 2; faktor <= MF35X_RPM_MAX_LUECKENFAKTOR; faktor++) {
           const uint32_t normiertUs = periodeUs / faktor;
           if (normiertUs >= minUs && normiertUs <= maxUs) {
@@ -522,7 +528,7 @@ void mf35xAttachStableRpmInterrupt(int pin, int mode) {
 
   if (ergebnis == pdPASS) {
     Serial.println(
-      "Drehzahlfilter V5.9.19: Median-21 + +/-8% + geschuetzte Neuerfassung"
+      "Drehzahlfilter V5.9.20: Median-21 + +/-8% + geschuetzte Neuerfassung + Alias-Schutz"
     );
   } else {
     controlTaskHandle = nullptr;
