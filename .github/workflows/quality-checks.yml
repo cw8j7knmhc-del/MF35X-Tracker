@@ -1,0 +1,71 @@
+name: MF35X quality checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'esp32/**'
+      - 'hardware/**'
+      - 'tests/**'
+      - '.github/workflows/quality-checks.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'esp32/**'
+      - 'hardware/**'
+      - 'tests/**'
+      - '.github/workflows/quality-checks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  hardware-pinout:
+    name: Hardware / firmware pinout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check hardware pinout consistency
+        run: python tests/check_hardware_pinout.py
+
+  firmware-compile:
+    name: ESP32-S3 compile (no signing)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core 3.3.11
+        run: |
+          arduino-cli core update-index \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core install esp32:esp32@3.3.11 \
+            --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+
+      - name: Install libraries
+        run: |
+          arduino-cli lib update-index
+          arduino-cli lib install "TinyGPSPlus"
+          arduino-cli lib install "Adafruit ADS1X15"
+          arduino-cli lib install "Adafruit MAX31855 library"
+
+      - name: Compile tracker firmware
+        run: |
+          rm -rf build-ci
+          mkdir -p build-ci
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3 \
+            --board-options PSRAM=opi \
+            --output-dir build-ci \
+            esp32/MF35X_Livetracker
