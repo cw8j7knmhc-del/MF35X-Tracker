@@ -45,8 +45,12 @@ jobs:
       - name: Test active stable GPIO11 logic
         run: python tests/test_stable_output_control_source.py
 
+      - name: Test robust RPM ISR pulse handling
+        run: python tests/test_rpm_isr_source.py
+
   firmware-compile:
     name: ESP32-S3 compile (no signing)
+    needs: static-tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

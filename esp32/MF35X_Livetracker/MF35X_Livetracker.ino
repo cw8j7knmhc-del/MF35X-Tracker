@@ -1,7 +1,8 @@
 /*
-  MF35X Livetracker V5.9.18 OTA SIGNED
+  MF35X Livetracker V5.9.20 OTA SIGNED
   - robuste Drehzahlauswertung am W-Anschluss mit Median + Plausibilitaetsfilter
   - zusaetzliche 0,5x-Doppelflankensperre gegen nahezu exakt doppelte RPM
+  - V5.9.20 Alias-Schutz: echte Frequenzspruenge werden nicht als Pulsluecken zurueckgefaltet
   - schnelle GPIO11-Steuerung verwendet ausschliesslich plausibilisierte RPM
   - RPM-Roh-/Filter-/Verwerfungsdiagnose in der Rennaufzeichnung
   - robuster ESP32-Maximalwert/Reset-Patch
