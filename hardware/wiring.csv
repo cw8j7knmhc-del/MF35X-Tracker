@@ -1,5 +1,6 @@
 net,endpoint_a,endpoint_b,status,source,notes
 +5V_IN,J2.PIN1,U1.5V_IN,PARTIAL,Freenove FNK0099A documentation,Board expects 5 V; exact DC/DC source and protection in final box still to confirm
+POWER_RETURN_TODO,J2.PIN2,DC_DC_RETURN_TODO,TODO,not yet physically documented,Confirm final DC/DC output return and whether it is identical to tracker common GND
 +3V3,U1.3V3,U2.VDD,VERIFIED,project wiring + firmware,ADS1115 VDD is on ESP32 3V3
 GND,U1.GND,U2.GND,VERIFIED,project wiring,Common ESP32/ADS1115 ground
 GND,U2.ADDR,GND,VERIFIED,project wiring,ADS1115 ADDR tied to GND -> address 0x48
