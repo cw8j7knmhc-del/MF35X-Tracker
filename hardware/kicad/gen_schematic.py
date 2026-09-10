@@ -60,18 +60,15 @@ def lib_graphics(lib_id,pins):
     short=lib_id.split(':',1)[1]
     maxy=max([abs(p.y) for p in pins] or [2.54])
     body=[]
+    # Keep symbol graphics to syntax already validated by KiCad in DRAFT-1.
+    # Electrical meaning comes from pin definitions and net labels; rectangles
+    # provide the component/connector body without unsupported graphic tokens.
     if lib_id=='Device:R':
         body.append('        (rectangle (start -1.30 -2.20) (end 1.30 2.20) (stroke (width 0.254) (type default)) (fill (type background)))')
     elif 'Conn_01x02' in lib_id:
-        body.append('        (rectangle (start -1.50 -2.20) (end 2.50 2.20) (stroke (width 0.254) (type default)) (fill (type background)))')
-        body.append('        (line (start 0.00 -1.27) (end 1.20 -1.27) (stroke (width 0.254) (type default)))')
-        body.append('        (line (start 0.00 1.27) (end 1.20 1.27) (stroke (width 0.254) (type default)))')
-    elif short=='HY_M154':
-        body.append(f'        (rectangle (start -5.50 {-maxy-1.27:.2f}) (end 5.50 {maxy+1.27:.2f}) (stroke (width 0.254) (type default)) (fill (type background)))')
-        body.append(f'        (line (start 0.00 {-maxy-0.8:.2f}) (end 0.00 {maxy+0.8:.2f}) (stroke (width 0.254) (type dash)))')
+        body.append('        (rectangle (start -2.20 -2.20) (end 2.20 2.20) (stroke (width 0.254) (type default)) (fill (type background)))')
     elif short=='SENSOR_CASE':
         body.append('        (rectangle (start -3.20 -3.20) (end 3.20 3.20) (stroke (width 0.254) (type default)) (fill (type background)))')
-        body.append('        (line (start -2.20 2.20) (end 2.20 -2.20) (stroke (width 0.254) (type default)))')
     else:
         body.append(f'        (rectangle (start -5.50 {-maxy-1.27:.2f}) (end 5.50 {maxy+1.27:.2f}) (stroke (width 0.254) (type default)) (fill (type background)))')
     return '\n'.join(body)
