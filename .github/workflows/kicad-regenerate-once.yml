@@ -1,0 +1,34 @@
+name: One-time KiCad regenerate
+
+on:
+  push:
+    branches: [hardware/kicad-schematic-v1]
+    paths:
+      - '.github/workflows/kicad-regenerate-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: hardware/kicad-schematic-v1
+
+      - name: Regenerate schematic
+        run: python hardware/kicad/gen_schematic.py
+
+      - name: Commit generated schematic
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hardware/kicad/MF35X_Tracker.kicad_sch
+          if git diff --cached --quiet; then
+            echo "Schematic already up to date."
+          else
+            git commit -m "Regenerate confirmed trackerbox wiring"
+            git push
+          fi
