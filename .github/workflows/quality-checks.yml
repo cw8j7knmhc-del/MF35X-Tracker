@@ -68,12 +68,16 @@ jobs:
 
       - name: Run schematic ERC
         run: |
+          set +e
           kicad-cli sch erc \
             --severity-error \
             --exit-code-violations \
             -o /tmp/MF35X_Tracker_erc.rpt \
             hardware/kicad/MF35X_Tracker.kicad_sch
-          cat /tmp/MF35X_Tracker_erc.rpt
+          rc=$?
+          echo "----- KiCad ERC report -----"
+          cat /tmp/MF35X_Tracker_erc.rpt || true
+          exit $rc
 
   firmware-compile:
     name: ESP32-S3 compile (no signing)
