@@ -19,11 +19,14 @@ SIGNATURE = "void schaltausgangAktualisieren()"
 
 
 def extract_function(source: str, signature: str) -> str:
-    start = source.find(signature)
+    # Only accept a real definition. The core also contains a forward
+    # declaration `void schaltausgangAktualisieren();` which must not match.
+    definition = signature + " {"
+    start = source.find(definition)
     if start < 0:
-        raise RuntimeError(f"Funktion nicht gefunden: {signature}")
+        raise RuntimeError(f"Funktionsdefinition nicht gefunden: {definition}")
 
-    brace = source.find("{", start)
+    brace = source.find("{", start + len(signature))
     if brace < 0:
         raise RuntimeError("Oeffnende Klammer der Funktion nicht gefunden")
 
