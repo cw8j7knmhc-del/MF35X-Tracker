@@ -35,6 +35,7 @@ HY=two([('1','J2_OUT','passive'),('2','J2_GND','passive')],[('3','J1_VCC','power
 CONN2=vp([('1','PIN1','passive'),('2','PIN2','passive')],True,x=8.0)
 SENSOR2=vp([('1','SENSE','passive'),('2','RETURN_GND','passive')],True,x=8.0)
 THERMO2=vp([('1','T+','passive'),('2','T-','passive')],True,x=8.0)
+PWRFLAG=[Pin('1','pwr','power_out',0,0,0)]
 
 COMPONENTS=[
 Symbol('MF35X:ESP32_S3_USED','U1','Freenove ESP32-S3 WROOM Lite FNK0099A',50,55,ESP),
@@ -52,6 +53,9 @@ Symbol('Connector_Generic:Conn_01x02','J5','Vehicle battery sense + / GND',50,17
 Symbol('Device:R','R3','100k battery divider upper',155,150,r_pins()),
 Symbol('Device:R','R4','10k battery divider lower',155,178,r_pins()),
 Symbol('Connector_Generic:Conn_01x02','J6','K-type thermocouple T+ / T-',195,130,THERMO2),
+# Logical ERC markers only: the actual source is the external DC/DC supply.
+Symbol('power:PWR_FLAG','PF1','PWR_FLAG +5V external source',25,55,PWRFLAG),
+Symbol('power:PWR_FLAG','PF2','PWR_FLAG GND external source',25,65,PWRFLAG),
 ]
 
 def esc(s): return s.replace('\\','\\\\').replace('"','\\"')
@@ -61,10 +65,10 @@ def lib_graphics(lib_id,pins):
     maxy=max([abs(p.y) for p in pins] or [2.54])
     body=[]
     # Keep symbol graphics to syntax already validated by KiCad in DRAFT-1.
-    # Electrical meaning comes from pin definitions and net labels; rectangles
-    # provide the component/connector body without unsupported graphic tokens.
     if lib_id=='Device:R':
         body.append('        (rectangle (start -1.30 -2.20) (end 1.30 2.20) (stroke (width 0.254) (type default)) (fill (type background)))')
+    elif lib_id=='power:PWR_FLAG':
+        body.append('        (rectangle (start -1.20 -1.20) (end 1.20 1.20) (stroke (width 0.254) (type default)) (fill (type none)))')
     elif 'Conn_01x02' in lib_id:
         body.append('        (rectangle (start -2.20 -2.20) (end 2.20 2.20) (stroke (width 0.254) (type default)) (fill (type background)))')
     elif short=='SENSOR_CASE':
@@ -82,7 +86,9 @@ def lib_symbol_block(lib_id,pins):
         f'        (number "{esc(p.number)}" (effects (font (size 1.0 1.0))))\n      )\n' for p in pins)
     refy=5.8 if lib_id=='Device:R' else y2+2
     valy=-5.8 if lib_id=='Device:R' else y1-2
-    return f'''    (symbol "{esc(lib_id)}" (pin_names (offset 0.5)) (in_bom yes) (on_board yes)
+    logical = lib_id=='power:PWR_FLAG'
+    ib='no' if logical else 'yes'; ob='no' if logical else 'yes'
+    return f'''    (symbol "{esc(lib_id)}" (pin_names (offset 0.5)) (in_bom {ib}) (on_board {ob})
       (property "Reference" "X" (at 0 {refy:.2f} 0) (effects (font (size 1.27 1.27))))
       (property "Value" "{esc(short)}" (at 0 {valy:.2f} 0) (effects (font (size 1.27 1.27))))
       (property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))
@@ -94,8 +100,10 @@ def lib_symbol_block(lib_id,pins):
 
 def inst(sym):
     pinb=''.join(f'    (pin "{esc(p.number)}" (uuid {uid(f"pin:{sym.ref}:{p.number}")}))\n' for p in sym.pins)
+    logical=sym.lib_id=='power:PWR_FLAG'
+    ib='no' if logical else 'yes'; ob='no' if logical else 'yes'
     return f'''  (symbol (lib_id "{esc(sym.lib_id)}") (at {sym.x:.2f} {sym.y:.2f} 0) (unit 1)
-    (in_bom yes) (on_board yes) (uuid {uid(f"symbol:{sym.ref}")})
+    (in_bom {ib}) (on_board {ob}) (uuid {uid(f"symbol:{sym.ref}")})
     (property "Reference" "{esc(sym.ref)}" (at {sym.x+7:.2f} {sym.y-3:.2f} 0) (effects (font (size 1.27 1.27))))
     (property "Value" "{esc(sym.value)}" (at {sym.x+7:.2f} {sym.y:.2f} 0) (effects (font (size 1.0 1.0))))
     (property "Footprint" "" (at {sym.x:.2f} {sym.y:.2f} 0) (effects (font (size 1.27 1.27)) hide))
@@ -138,6 +146,10 @@ def build():
             s,p=lookup[ep]; key=f'{s.ref}.{p.name}'; x=s.x+p.x; y=s.y-p.y
             if status in {'NC_RESERVED','NC_UNUSED'}: ncs.add((key,x,y))
             else: labels.add((key,net,x,y))
+    # PWR_FLAG is ERC metadata rather than physical wiring, so it stays out of
+    # wiring.csv. Both flags declare the external DC/DC source to KiCad ERC.
+    labels.add(('PF1.pwr','+5V_IN',25.0,55.0))
+    labels.add(('PF2.pwr','GND',25.0,65.0))
     out=['(kicad_sch','  (version 20231120)','  (generator "chatgpt_mf35x_hw_final")',f'  (uuid {ROOT_UUID})','  (paper "A4")',
          '  (title_block','    (title "MF35X Livetracker - Trackerbox Electrical Schematic")','    (date "2026-09-10")','    (rev "HW-REV1")','    (company "MF35X Tracker")','    (comment 1 "Confirmed tracker wiring; external solenoid power driver remains boundary-defined")','  )','  (lib_symbols']
     out.extend(lib_symbol_block(k,v) for k,v in libs.items()); out.append('  )')
