@@ -39,6 +39,12 @@ jobs:
       - name: Self-test race CSV regression checker
         run: python tests/check_race_csv.py --self-test
 
+      - name: Test GPIO11 core fallback logic
+        run: python tests/test_output_control_source.py
+
+      - name: Test active stable GPIO11 logic
+        run: python tests/test_stable_output_control_source.py
+
   firmware-compile:
     name: ESP32-S3 compile (no signing)
     runs-on: ubuntu-latest
