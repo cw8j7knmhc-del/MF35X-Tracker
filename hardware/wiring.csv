@@ -15,18 +15,18 @@ EXT_OUTPUT_GND_TODO,J1.PIN2,GND_OR_DRIVER_RETURN,TODO,not yet physically documen
 TC_CLK,U1.GPIO12,U4.CLK,VERIFIED,hardware/pinout.csv + firmware,MAX31855 clock
 TC_CS,U1.GPIO13,U4.CS,VERIFIED,hardware/pinout.csv + firmware,MAX31855 chip select
 TC_DO,U4.DO,U1.GPIO14,VERIFIED,hardware/pinout.csv + firmware,MAX31855 data output to ESP32
-MAX31855_VCC_TODO,U4.VCC,3V3_OR_5V,TODO,not yet physically documented,Confirm exact breakout module supply voltage used in trackerbox
-GND,U4.GND,GND,PARTIAL,expected module wiring,Confirm actual breakout ground terminal on installed module
++3V3,U1.3V3,U4.VCC,VERIFIED,established trackerbox wiring 2026-08-21,MAX31855 VIN is supplied from ESP32 3.3 V; 3Vo remains unused
+GND,U4.GND,GND,VERIFIED,established trackerbox wiring 2026-08-21,MAX31855 GND is on tracker common GND
 THERMOCOUPLE_TP,U4.T+,KTYPE.T+,PARTIAL,project design,K-type cylinder-head thermocouple positive
 THERMOCOUPLE_TM,U4.T-,KTYPE.T-,PARTIAL,project design,K-type cylinder-head thermocouple negative
 GPS_TX_TO_ESP_RX,U3.TX,U1.GPIO16,VERIFIED,hardware/pinout.csv + firmware,GPS TX to ESP32 UART2 RX
 ESP_TX_TO_GPS_RX,U1.GPIO17,U3.RX,VERIFIED,hardware/pinout.csv + firmware,ESP32 UART2 TX to GPS RX
-GND,U3.GND,GND,PARTIAL,project design,Common GPS ground expected; verify installed module connector
-GPS_VCC_TODO,U3.VCC,3V3_OR_5V,TODO,not yet physically documented,Exact installed GPS module supply connection must be confirmed
+GND,U3.GND,GND,VERIFIED,established GPS wiring,GPS ground is connected to tracker common GND
++3V3,U1.3V3,U3.VCC,VERIFIED,established GPS wiring,GPS module VCC is supplied from ESP32 3.3 V
 +3V3,U1.3V3,R1.1,DERIVED,firmware divider equation,Oil-temp fixed resistor high side
 OIL_TEMP_SENSE,R1.2,U2.AIN0,VERIFIED,hardware/pinout.csv + firmware,ADS1115 AIN0 oil temperature
-OIL_TEMP_SENSE,R1.2,J3.SENSE,DERIVED,firmware divider equation,Node between 980 ohm fixed resistor and VDO NTC
-GND,J3.RETURN_GND,GND,PARTIAL,sensor topology,Confirm whether installed VDO sender uses separate return or case/engine ground
+OIL_TEMP_SENSE,R1.2,J3.SENSE,DERIVED,firmware divider equation,Oil-temperature divider measurement node to the single sender terminal
+GND,J3.RETURN_GND,GND,VERIFIED,established VDO 801/1/6 wiring,One-wire VDO sender return is through metal housing/thread to engine block/ground; RETURN_GND represents the case/thread electrically not a second signal wire
 +3V3,U1.3V3,R2.1,DERIVED,firmware divider equation,Oil-pressure fixed resistor high side; firmware calculation uses measured 3.27 V rail value
 OIL_PRESSURE_SENSE,R2.2,U2.AIN1,VERIFIED,hardware/pinout.csv + firmware,ADS1115 AIN1 oil pressure
 OIL_PRESSURE_SENSE,R2.2,J4.SENSE,DERIVED,firmware divider equation,Node between fixed resistor and pressure sender
