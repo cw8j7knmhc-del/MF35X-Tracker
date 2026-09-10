@@ -39,6 +39,9 @@ jobs:
       - name: Check KiCad wiring consistency
         run: python tests/check_kicad_wiring.py
 
+      - name: Check KiCad pin-anchor coordinates
+        run: python tests/check_kicad_pin_anchors.py
+
       - name: Self-test race CSV regression checker
         run: python tests/check_race_csv.py --self-test
 
