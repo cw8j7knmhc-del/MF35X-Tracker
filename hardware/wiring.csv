@@ -35,5 +35,5 @@ GND,J5.PIN2,GND,PARTIAL,project design,Vehicle/sensor ground return
 BATTERY_SENSE,R3.2,U2.AIN2,VERIFIED,hardware/pinout.csv + firmware,ADS1115 AIN2 battery voltage
 BATTERY_SENSE,R3.2,R4.1,DERIVED,firmware voltage divider,100k/10k divider midpoint
 GND,R4.2,GND,DERIVED,firmware voltage divider,10k lower resistor to ground
-GPIO0_RESERVED,U1.GPIO0,NC_RESERVED,VERIFIED,hardware/pinout.csv,Must remain unused because of boot/strapping requirement
-ADS_AIN3_UNUSED,U2.AIN3,NC_UNUSED,VERIFIED,firmware,AIN3 not used by tracker firmware
+GPIO0_RESERVED,U1.GPIO0,,NC_RESERVED,hardware/pinout.csv,Must remain unused because of boot/strapping requirement
+ADS_AIN3_UNUSED,U2.AIN3,,NC_UNUSED,firmware,AIN3 not used by tracker firmware
