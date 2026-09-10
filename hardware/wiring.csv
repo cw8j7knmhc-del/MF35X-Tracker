@@ -6,12 +6,14 @@ GND,U1.GND,U2.GND,VERIFIED,project wiring,Common ESP32/ADS1115 ground
 GND,U2.ADDR,GND,VERIFIED,project wiring,ADS1115 ADDR tied to GND -> address 0x48
 I2C_SDA,U1.GPIO8,U2.SDA,VERIFIED,hardware/pinout.csv + firmware,I2C data
 I2C_SCL,U1.GPIO9,U2.SCL,VERIFIED,hardware/pinout.csv + firmware,I2C clock
-RPM_IN,U1.GPIO10,U5.OUTPUT_SIGNAL,PARTIAL,hardware/pinout.csv + project wiring,HY-M154 output feeds GPIO10; exact channel terminal jumper pull-up and output-ground arrangement still to confirm
-W_TERMINAL,VEHICLE.W,U5.W_INPUT,PARTIAL,project design,W terminal enters optocoupler input side; do not connect raw W signal directly to ESP32
-HY_INPUT_GND_TODO,U5.INPUT_GND,VEHICLE_GND_OR_ISOLATED_RETURN,TODO,not yet physically documented,Confirm input-side return and jumper state
-HY_OUTPUT_GND_TODO,U5.OUTPUT_GND,ESP32_GND_OR_ISOLATED_RETURN,TODO,not yet physically documented,Confirm output-side ground/reference and whether isolation jumper is fitted
-EXT_OUTPUT_LOGIC,U1.GPIO11,J1.PIN1,VERIFIED,hardware/pinout.csv + firmware,3.3 V logic output
-EXT_OUTPUT_GND_TODO,J1.PIN2,GND_OR_DRIVER_RETURN,TODO,not yet physically documented,Confirm external load/driver stage and reference ground
+RPM_IN,U5.J1_OUT,U1.GPIO10,VERIFIED,documented tracker wiring 2026-08-27,HY-M154 J1-OUT feeds ESP32 GPIO10
+W_TERMINAL,VEHICLE.W,U5.J2_OUT,VERIFIED,documented tracker wiring 2026-08-27,Alternator W terminal is connected to HY-M154 J2-OUT; raw W signal is never connected directly to ESP32
+GND,U5.J2_GND,GND,VERIFIED,documented tracker wiring 2026-08-27,HY-M154 J2-GND is connected to tracker/common vehicle ground
++5V_IN,U5.J1_VCC,+5V_IN,VERIFIED,documented tracker wiring 2026-08-27,HY-M154 J1-VCC is supplied with 5 V
+GND,U5.J1_GND,GND,VERIFIED,documented tracker wiring 2026-08-27,HY-M154 J1-GND is connected to tracker common ground
+EXT_OUTPUT_LOGIC,U1.GPIO11,J1.PIN1,VERIFIED,hardware/pinout.csv + firmware + user-confirmed function,GPIO11 is the 3.3 V logic control signal used to switch the solenoid valve
+SOLENOID_CONTROL,J1.PIN1,VEHICLE.SOLENOID_VALVE_CONTROL,VERIFIED,user-confirmed tracker function,GPIO11 controls the external solenoid valve switching function; this does not mean the valve coil is powered directly from GPIO11
+SOLENOID_DRIVER_TODO,J1.PIN1,SOLENOID_DRIVER.INPUT,TODO,driver topology not yet recovered from documentation,Confirm exact transistor MOSFET relay or optocoupler stage plus valve supply current flyback diode and power return before drawing the power circuit
 TC_CLK,U1.GPIO12,U4.CLK,VERIFIED,hardware/pinout.csv + firmware,MAX31855 clock
 TC_CS,U1.GPIO13,U4.CS,VERIFIED,hardware/pinout.csv + firmware,MAX31855 chip select
 TC_DO,U4.DO,U1.GPIO14,VERIFIED,hardware/pinout.csv + firmware,MAX31855 data output to ESP32
