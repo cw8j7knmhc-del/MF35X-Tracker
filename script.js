@@ -135,7 +135,7 @@ onValue(ref(db, "tracker/live"), s => {
 
   if (Date.now() - ts > liveTimeoutMs) {
     currentLive = null;
-    txt("lastUpdateSmall", new Date(ts).toLocaleTimeString("de-AT"));
+    txt("lastUpdateSmall", new Date(ts).toLocaleString("de-AT", { timeZone: "Europe/Vienna", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }));
     offline("Offline");
     return;
   }
@@ -156,7 +156,7 @@ onValue(ref(db, "tracker/live"), s => {
 
   txt("speed", speed != null ? speed.toFixed(1) : "---");
   txt("sat", d.satellites ?? "---");
-  txt("lastUpdateSmall", new Date(ts).toLocaleTimeString("de-AT"));
+  txt("lastUpdateSmall", new Date(ts).toLocaleString("de-AT", { timeZone: "Europe/Vienna", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }));
   txt("battery", bat != null ? bat.toFixed(1) : "---");
   txt("rpm", rpm != null ? Math.round(rpm) : "---");
   txt("oilpressure", op != null ? op.toFixed(1) : "---");
